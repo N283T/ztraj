@@ -47,7 +47,7 @@ const DcdHeader = struct {
 ///   var reader = try DcdReader.open(allocator, "trajectory.dcd");
 ///   defer reader.deinit();
 ///
-///   while (reader.next()) |frame| {
+///   while (try reader.next()) |frame| {
 ///       _ = frame.x[0]; // coordinates already in angstroms
 ///   }
 ///
@@ -135,10 +135,14 @@ pub const DcdReader = struct {
     /// Read the next frame.
     ///
     /// Returns a pointer to the internal SOA frame on success.
-    /// Returns null at end of file.
+    /// Returns null at genuine end of file.
+    /// Returns an error for any actual read or format failure.
     /// The returned pointer is valid until the next call to next() or deinit().
-    pub fn next(self: *Self) ?*const types.Frame {
-        self.readFrameInto() catch return null;
+    pub fn next(self: *Self) !?*const types.Frame {
+        self.readFrameInto() catch |err| {
+            if (err == DcdError.EndOfFile) return null;
+            return err;
+        };
         return &self.frame;
     }
 
@@ -430,7 +434,7 @@ test "DcdReader reads existing DCD file" {
     try std.testing.expectEqual(@as(u32, 304), reader.nAtoms());
 
     // Read first frame.
-    const frame = reader.next() orelse return error.TestUnexpectedNull;
+    const frame = (try reader.next()) orelse return error.TestUnexpectedNull;
 
     try std.testing.expectEqual(@as(usize, 304), frame.x.len);
     try std.testing.expectEqual(@as(usize, 304), frame.y.len);
@@ -454,7 +458,7 @@ test "DcdReader reads all frames from DCD file" {
     defer reader.deinit();
 
     var count: u32 = 0;
-    while (reader.next()) |_| {
+    while (try reader.next()) |_| {
         count += 1;
     }
 

@@ -28,6 +28,8 @@ pub const ParseError = error{
     MissingCoordinateField,
     /// A coordinate value is not a valid number
     InvalidCoordinate,
+    /// Too many rows had unparseable coordinates (>10% of total rows)
+    TooManyUnparseableCoordinates,
 };
 
 /// Indices of relevant _atom_site columns within the loop
@@ -247,6 +249,8 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     var col_idx: usize = 0;
     var first_alt_loc: u8 = 0;
     var first_model: ?i32 = null;
+    var rows_total: usize = 0;
+    var rows_coord_failed: usize = 0;
 
     row_loop: while (true) {
         const tok = tokenizer.next();
@@ -286,10 +290,21 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
                     }
                 }
 
-                // Parse coordinates
-                const x = parseFloat(row[cols.cartn_x.?]) catch continue :row_loop;
-                const y = parseFloat(row[cols.cartn_y.?]) catch continue :row_loop;
-                const z = parseFloat(row[cols.cartn_z.?]) catch continue :row_loop;
+                rows_total += 1;
+
+                // Parse coordinates — track failures instead of silently skipping.
+                const x = parseFloat(row[cols.cartn_x.?]) catch {
+                    rows_coord_failed += 1;
+                    continue :row_loop;
+                };
+                const y = parseFloat(row[cols.cartn_y.?]) catch {
+                    rows_coord_failed += 1;
+                    continue :row_loop;
+                };
+                const z = parseFloat(row[cols.cartn_z.?]) catch {
+                    rows_coord_failed += 1;
+                    continue :row_loop;
+                };
 
                 // Element
                 const element: elem.Element = if (cols.type_symbol) |tc|
@@ -350,6 +365,14 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     }
 
     if (raw_atoms.items.len == 0) return ParseError.NoAtomSiteLoop;
+
+    // Reject files where more than 10% of candidate rows had unparseable coordinates.
+    if (rows_coord_failed > 0 and rows_total > 0) {
+        // Use integer arithmetic: failed * 10 > total means >10%.
+        if (rows_coord_failed * 10 > rows_total) {
+            return ParseError.TooManyUnparseableCoordinates;
+        }
+    }
 
     // ------------------------------------------------------------------
     // Phase 3: count unique residues and chains

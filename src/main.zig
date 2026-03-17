@@ -297,8 +297,11 @@ fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.ParseResu
     } else if (isCif(path)) {
         return io.mmcif.parse(allocator, data);
     } else {
-        // Default: try PDB.
-        return io.pdb.parse(allocator, data);
+        std.debug.print(
+            "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif)\n",
+            .{path},
+        );
+        std.process.exit(1);
     }
 }
 
@@ -463,7 +466,7 @@ fn loadAllFrames(
     if (isXtc(traj_path)) {
         var reader = try io.xtc.XtcReader.open(allocator, traj_path);
         defer reader.deinit();
-        while (reader.next()) |frame_ptr| {
+        while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
             @memcpy(copy.y, frame_ptr.y);
@@ -476,7 +479,7 @@ fn loadAllFrames(
     } else if (isDcd(traj_path)) {
         var reader = try io.dcd.DcdReader.open(allocator, traj_path);
         defer reader.deinit();
-        while (reader.next()) |frame_ptr| {
+        while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
             @memcpy(copy.y, frame_ptr.y);
@@ -494,8 +497,13 @@ fn loadAllFrames(
             try io.pdb.parse(allocator, data)
         else if (isCif(traj_path))
             try io.mmcif.parse(allocator, data)
-        else
-            try io.pdb.parse(allocator, data);
+        else {
+            std.debug.print(
+                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .dcd, .pdb, .cif, .mmcif)\n",
+                .{traj_path},
+            );
+            std.process.exit(1);
+        };
         pr.topology.deinit();
         try frames.append(allocator, pr.frame);
     }
@@ -1032,7 +1040,12 @@ fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
     const scheme: analysis.contacts.Scheme = blk: {
         if (std.mem.eql(u8, args.contacts_scheme, "ca")) break :blk .ca;
         if (std.mem.eql(u8, args.contacts_scheme, "closest")) break :blk .closest;
-        break :blk .closest_heavy;
+        if (std.mem.eql(u8, args.contacts_scheme, "closest_heavy")) break :blk .closest_heavy;
+        std.debug.print(
+            "error: unknown contacts scheme '{s}' (valid values: ca, closest, closest_heavy)\n",
+            .{args.contacts_scheme},
+        );
+        std.process.exit(1);
     };
 
     var buf = std.ArrayList(u8){};
@@ -1162,7 +1175,7 @@ fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
             @memcpy(s2z, frame.z);
         }
 
-        // Estimate box volume from box vectors, or fall back to 1000 Å³.
+        // RDF requires periodic box information to compute number density.
         const box_vol: f64 = if (frame.box_vectors) |bv| blk: {
             const ax: f64 = bv[0][0];
             const ay: f64 = bv[0][1];
@@ -1177,8 +1190,21 @@ fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
             const cross_y = bz * cx - bx * cz;
             const cross_z = bx * cy - by * cx;
             const vol = @abs(ax * cross_x + ay * cross_y + az * cross_z);
-            break :blk if (vol > 0.0) vol else 1000.0;
-        } else 1000.0;
+            if (vol <= 0.0) {
+                std.debug.print(
+                    "error: rdf requires a valid periodic box but frame box volume is zero\n",
+                    .{},
+                );
+                std.process.exit(1);
+            }
+            break :blk vol;
+        } else {
+            std.debug.print(
+                "error: rdf requires periodic box information but no box vectors are present in the trajectory\n",
+                .{},
+            );
+            std.process.exit(1);
+        };
 
         var result = try analysis.rdf.compute(
             allocator, s1x, s1y, s1z, s2x, s2y, s2z, box_vol, cfg,
@@ -1287,7 +1313,11 @@ pub fn main() !void {
     };
 
     result catch |err| {
-        std.debug.print("error: {s}\n", .{@errorName(err)});
+        const top_path = args.top_path orelse "(none)";
+        std.debug.print(
+            "error: {s} failed for trajectory '{s}' (topology: '{s}'): {s}\n",
+            .{ @tagName(args.subcommand), args.traj_path, top_path, @errorName(err) },
+        );
         std.process.exit(1);
     };
 }

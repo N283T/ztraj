@@ -28,7 +28,7 @@ pub const XtcReadError = error{
 ///   var reader = try XtcReader.open(allocator, "trajectory.xtc");
 ///   defer reader.deinit();
 ///
-///   while (reader.next()) |frame| {
+///   while (try reader.next()) |frame| {
 ///       // frame is valid until the next call to next() or deinit()
 ///       _ = frame.x[0];
 ///   }
@@ -74,12 +74,18 @@ pub const XtcReader = struct {
     /// Read the next frame.
     ///
     /// Returns a pointer to the internal frame buffer on success.
-    /// Returns null at end of file.
+    /// Returns null at genuine end of file.
+    /// Returns an error for any actual read or decompression failure.
     /// The returned pointer is valid until the next call to next() or deinit().
-    pub fn next(self: *Self) ?*const types.Frame {
+    pub fn next(self: *Self) !?*const types.Frame {
         var xtc_frame = self.inner.readFrame() catch |err| {
             if (err == XtcError.EndOfFile) return null;
-            return null;
+            return switch (err) {
+                XtcError.InvalidMagic => XtcReadError.InvalidMagic,
+                XtcError.OutOfMemory => XtcReadError.OutOfMemory,
+                XtcError.DecompressionError => XtcReadError.DecompressionError,
+                else => XtcReadError.ReadError,
+            };
         };
         defer xtc_frame.deinit(self.allocator);
 

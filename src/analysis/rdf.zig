@@ -53,6 +53,17 @@ pub const Config = struct {
 /// the correct selections.
 ///
 /// Returns an RdfResult owned by the caller; call `.deinit()` when done.
+pub const ComputeError = error{
+    /// Coordinate slices for the same selection have mismatched lengths.
+    MismatchedSelectionLengths,
+    /// n_bins must be greater than zero.
+    ZeroBins,
+    /// r_max must be greater than r_min.
+    InvalidRange,
+    /// box_volume must be positive.
+    InvalidBoxVolume,
+};
+
 pub fn compute(
     allocator: std.mem.Allocator,
     sel1_x: []const f32,
@@ -64,13 +75,11 @@ pub fn compute(
     box_volume: f64,
     config: Config,
 ) !RdfResult {
-    std.debug.assert(sel1_x.len == sel1_y.len);
-    std.debug.assert(sel1_x.len == sel1_z.len);
-    std.debug.assert(sel2_x.len == sel2_y.len);
-    std.debug.assert(sel2_x.len == sel2_z.len);
-    std.debug.assert(config.n_bins > 0);
-    std.debug.assert(config.r_max > config.r_min);
-    std.debug.assert(box_volume > 0.0);
+    if (sel1_x.len != sel1_y.len or sel1_x.len != sel1_z.len) return ComputeError.MismatchedSelectionLengths;
+    if (sel2_x.len != sel2_y.len or sel2_x.len != sel2_z.len) return ComputeError.MismatchedSelectionLengths;
+    if (config.n_bins == 0) return ComputeError.ZeroBins;
+    if (config.r_max <= config.r_min) return ComputeError.InvalidRange;
+    if (box_volume <= 0.0) return ComputeError.InvalidBoxVolume;
 
     const n_bins = config.n_bins;
     const r_min: f64 = config.r_min;
