@@ -86,23 +86,15 @@ pub const DcdReader = struct {
             .reverse_endian = false,
         };
 
-        readHeader(file, &hdr) catch |err| {
-            file.close();
-            return err;
-        };
+        try readHeader(file, &hdr);
 
         const n_atoms: usize = @intCast(hdr.natoms);
 
-        const coord_buf = allocator.alloc(f32, n_atoms) catch {
-            file.close();
-            return DcdError.OutOfMemory;
-        };
+        const coord_buf = allocator.alloc(f32, n_atoms) catch return DcdError.OutOfMemory;
         errdefer allocator.free(coord_buf);
 
-        const frame = types.Frame.init(allocator, n_atoms) catch |err| {
-            file.close();
-            return err;
-        };
+        var frame = types.Frame.init(allocator, n_atoms) catch return DcdError.OutOfMemory;
+        errdefer frame.deinit();
 
         return Self{
             .file = file,
