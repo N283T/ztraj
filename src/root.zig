@@ -27,6 +27,17 @@ pub const analysis = struct {
     pub const rdf = @import("analysis/rdf.zig");
 };
 
+pub const io = struct {
+    pub const pdb = @import("io/pdb.zig");
+    pub const mmcif = @import("io/mmcif.zig");
+    pub const cif_tokenizer = @import("io/cif_tokenizer.zig");
+    pub const xtc = @import("io/xtc.zig");
+    pub const dcd = @import("io/dcd.zig");
+};
+
+pub const select = @import("select.zig");
+pub const output = @import("output.zig");
+
 test {
     @import("std").testing.refAllDecls(@This());
 }

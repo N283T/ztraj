@@ -6,17 +6,20 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Library module (exposed to package consumers via zig fetch)
-    const mod = b.addModule("ztraj", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-    });
-
     const zxdrfile_dep = b.dependency("zxdrfile", .{
         .target = target,
         .optimize = optimize,
     });
     const zxdrfile_mod = zxdrfile_dep.module("zxdrfile");
+
+    // Library module (exposed to package consumers via zig fetch)
+    const mod = b.addModule("ztraj", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "zxdrfile", .module = zxdrfile_mod },
+        },
+    });
 
     // CLI executable
     const options = b.addOptions();
