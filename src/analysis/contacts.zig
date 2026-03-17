@@ -108,8 +108,8 @@ pub fn compute(
     scheme: Scheme,
     cutoff: f32,
 ) ![]Contact {
-    var result = std.ArrayList(Contact).init(allocator);
-    errdefer result.deinit();
+    var result = std.ArrayList(Contact){};
+    errdefer result.deinit(allocator);
 
     const n_res = topology.residues.len;
 
@@ -127,7 +127,7 @@ pub fn compute(
             ) orelse continue;
 
             if (dist < cutoff) {
-                try result.append(.{
+                try result.append(allocator, .{
                     .residue_i = ri,
                     .residue_j = rj,
                     .distance = dist,
@@ -136,7 +136,7 @@ pub fn compute(
         }
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 // ============================================================================

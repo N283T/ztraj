@@ -54,8 +54,8 @@ pub fn detect(
     frame: types.Frame,
     config: Config,
 ) ![]HBond {
-    var result = std.ArrayList(HBond).init(allocator);
-    errdefer result.deinit();
+    var result = std.ArrayList(HBond){};
+    errdefer result.deinit(allocator);
 
     const n_atoms = topology.atoms.len;
 
@@ -121,7 +121,7 @@ pub fn detect(
             const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
 
             if (angle_deg >= config.angle_cutoff) {
-                try result.append(.{
+                try result.append(allocator, .{
                     .donor = donor_idx,
                     .hydrogen = h_idx,
                     .acceptor = acc_idx,
@@ -132,7 +132,7 @@ pub fn detect(
         }
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 // ============================================================================
