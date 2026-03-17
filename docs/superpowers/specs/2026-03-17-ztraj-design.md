@@ -63,6 +63,7 @@ pub const Residue = struct {
     name: FixedString(5),       // 5 chars for mmCIF compatibility
     chain_index: u32,
     atom_range: Range,
+    resid: i32,                 // residue sequence number
 };
 
 /// SOA layout for SIMD-friendly coordinate access.
@@ -74,6 +75,10 @@ pub const Frame = struct {
     box_vectors: ?[3][3]f32,
     time: f32,
     step: i32,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, n_atoms: usize) !Frame { ... }
+    pub fn deinit(self: *Frame) void { ... }
 };
 
 /// Full trajectory (for small systems / complete loading)
