@@ -177,14 +177,20 @@ def main() -> None:
         ("Center of mass", gen_center_of_mass),
     ]
 
+    failed = []
     for name, func in generators:
         print(f"Generating {name}...")
         try:
             func()
         except Exception as e:
-            print(f"  ERROR: {e}", file=sys.stderr)
+            print(f"  ERROR: {name}: {e}", file=sys.stderr)
+            failed.append(name)
 
-    print("\nDone.")
+    print()
+    if failed:
+        print(f"FAILED: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
+    print("Done. All references generated successfully.")
 
 
 if __name__ == "__main__":

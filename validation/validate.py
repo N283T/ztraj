@@ -17,6 +17,7 @@ Usage:
 import json
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +41,12 @@ def run_ztraj(ztraj: str, args: list[str]) -> dict:
         print(f"  FAILED: {' '.join(cmd)}", file=sys.stderr)
         print(f"  stderr: {result.stderr}", file=sys.stderr)
         raise RuntimeError(f"ztraj exited with code {result.returncode}")
-    return json.loads(result.stdout)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        print(f"  FAILED to parse JSON from: {' '.join(cmd)}", file=sys.stderr)
+        print(f"  stdout (first 200 chars): {result.stdout[:200]}", file=sys.stderr)
+        raise RuntimeError(f"ztraj produced invalid JSON: {e}") from e
 
 
 def load_ref(name: str) -> dict:
@@ -71,7 +77,7 @@ def compare_arrays(
     max_idx = np.unravel_index(np.argmax(abs_diff), abs_diff.shape)
 
     # Use numpy allclose for combined atol+rtol check
-    passed = np.allclose(zt, ref, atol=atol, rtol=rtol)
+    passed = bool(np.allclose(zt, ref, atol=atol, rtol=rtol))
 
     status = "PASS" if passed else "FAIL"
     print(f"  {status}: {name}")
@@ -171,7 +177,7 @@ def validate_dihedrals(ztraj: str) -> bool:
     diff = (diff + np.pi) % (2 * np.pi) - np.pi
     max_diff = np.max(np.abs(diff))
     mean_diff = np.mean(np.abs(diff))
-    passed = max_diff < 1e-4
+    passed = bool(max_diff < 1e-4)
     status = "PASS" if passed else "FAIL"
     print(f"  {status}: dihedrals (with ±π wrapping)")
     print(f"    max_diff={max_diff:.6e}, mean_diff={mean_diff:.6e}, atol=1e-04")
@@ -192,13 +198,13 @@ def validate_center_of_mass(ztraj: str) -> bool:
     return compare_arrays("center_of_mass", ztraj_vals, ref["values"], atol=0.05)
 
 
-def validate_atlas_rmsd(ztraj: str) -> bool:
+def validate_atlas_rmsd(ztraj: str) -> bool | None:
     """Cross-validate RMSD against MD ATLAS reference TSV."""
     print("\n=== ATLAS Cross-Validation: RMSD ===")
     atlas_path = DATA_DIR / "3tvj_I_RMSD.tsv"
     if not atlas_path.exists():
         print("  SKIP: ATLAS RMSD TSV not found")
-        return True
+        return None
 
     # Load ATLAS data (TSV with header: Frame, RMSD)
     atlas_data = np.loadtxt(atlas_path, skiprows=1, usecols=1)
@@ -221,7 +227,7 @@ def validate_atlas_rmsd(ztraj: str) -> bool:
     )
 
 
-def validate_atlas_rg(ztraj: str) -> bool:
+def validate_atlas_rg(ztraj: str) -> bool | None:
     """Cross-validate Rg against MD ATLAS reference TSV.
 
     ATLAS TSV starts at time=0.1ns (no frame 0), so we skip ztraj
@@ -232,7 +238,7 @@ def validate_atlas_rg(ztraj: str) -> bool:
     atlas_path = DATA_DIR / "3tvj_I_gyrate.tsv"
     if not atlas_path.exists():
         print("  SKIP: ATLAS gyrate TSV not found")
-        return True
+        return None
 
     atlas_data = np.loadtxt(atlas_path, skiprows=1, usecols=1)
 
@@ -281,28 +287,36 @@ def main() -> None:
         ("ATLAS Rg", validate_atlas_rg),
     ]
 
-    results: dict[str, bool] = {}
+    results: dict[str, bool | None] = {}
     for name, func in validators:
         try:
             results[name] = func(ztraj)
         except Exception as e:
-            print(f"  ERROR: {e}", file=sys.stderr)
+            print(f"  ERROR ({type(e).__name__}): {e}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
             results[name] = False
 
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)
 
-    passed = sum(1 for v in results.values() if v)
+    passed = sum(1 for v in results.values() if v is True)
+    skipped = sum(1 for v in results.values() if v is None)
+    failed = sum(1 for v in results.values() if v is False)
     total = len(results)
 
     for name, ok in results.items():
-        status = "PASS" if ok else "FAIL"
+        if ok is None:
+            status = "SKIP"
+        elif ok:
+            status = "PASS"
+        else:
+            status = "FAIL"
         print(f"  [{status}] {name}")
 
-    print(f"\n{passed}/{total} validations passed")
+    print(f"\n{passed}/{total} passed, {skipped} skipped, {failed} failed")
 
-    if passed < total:
+    if failed > 0:
         sys.exit(1)
 
 
