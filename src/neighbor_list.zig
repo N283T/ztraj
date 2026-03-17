@@ -1,25 +1,11 @@
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
+const simd_vec = @import("simd/vec.zig");
 
-// ============================================================================
-// Local Vec3Gen — minimal 3D point type used by the spatial grid.
-// ============================================================================
-
-/// Generic 3D vector/point with x, y, z fields of type T.
-pub fn Vec3Gen(comptime T: type) type {
-    return struct {
-        x: T,
-        y: T,
-        z: T,
-    };
-}
-
-/// f64 3D vector (default precision).
-pub const Vec3 = Vec3Gen(f64);
-
-/// f32 3D vector.
-pub const Vec3f32 = Vec3Gen(f32);
+pub const Vec3Gen = simd_vec.Vec3Gen;
+pub const Vec3 = simd_vec.Vec3;
+pub const Vec3f32 = simd_vec.Vec3f32;
 
 // ============================================================================
 // Cell list
