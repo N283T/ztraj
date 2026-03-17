@@ -1,0 +1,18 @@
+.{
+    .fingerprint = 0x17e956260cdc6d81,
+    .name = .ztraj,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .zxdrfile = .{
+            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.1.1#ef0e63dfd74eae5f3a0b49d19fac002989c0a351",
+            .hash = "zxdrfile-0.1.1-JIaQ9ir5AACu7dbzJDk9taGRu7tRROckg6kClL58b9dP",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+    },
+}
