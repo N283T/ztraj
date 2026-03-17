@@ -5,6 +5,27 @@
 
 pub const types = @import("types.zig");
 pub const element = @import("element.zig");
+pub const simd = @import("simd.zig");
+pub const thread_pool = @import("thread_pool.zig");
+pub const neighbor_list = @import("neighbor_list.zig");
+pub const mmap_reader = @import("mmap_reader.zig");
+
+pub const geometry = struct {
+    pub const distances = @import("geometry/distances.zig");
+    pub const angles = @import("geometry/angles.zig");
+    pub const dihedrals = @import("geometry/dihedrals.zig");
+    pub const center = @import("geometry/center.zig");
+    pub const rg = @import("geometry/rg.zig");
+    pub const inertia = @import("geometry/inertia.zig");
+    pub const rmsd = @import("geometry/rmsd.zig");
+    pub const rmsf = @import("geometry/rmsf.zig");
+};
+
+pub const analysis = struct {
+    pub const hbonds = @import("analysis/hbonds.zig");
+    pub const contacts = @import("analysis/contacts.zig");
+    pub const rdf = @import("analysis/rdf.zig");
+};
 
 test {
     @import("std").testing.refAllDecls(@This());
