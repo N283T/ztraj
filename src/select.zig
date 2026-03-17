@@ -127,6 +127,19 @@ pub fn byKeyword(
     switch (kw) {
         .backbone => {
             for (topology.atoms, 0..) |atom, i| {
+                // Only select backbone atoms from protein residues.
+                const res_idx = atom.residue_index;
+                if (res_idx >= topology.residues.len) continue;
+                const res_name = topology.residues[res_idx].name.slice();
+                var is_protein = false;
+                for (protein_residues) |pr| {
+                    if (std.mem.eql(u8, res_name, pr)) {
+                        is_protein = true;
+                        break;
+                    }
+                }
+                if (!is_protein) continue;
+
                 const name = atom.name.slice();
                 for (backbone_names) |bn| {
                     if (std.mem.eql(u8, name, bn)) {
@@ -358,9 +371,10 @@ test "byKeyword backbone selects N CA C O atoms" {
     const indices = try byKeyword(allocator, topo, .backbone);
     defer allocator.free(indices);
 
-    // backbone_names = {N, CA, C, O}
-    // GLY: 0(N),1(CA),2(C),3(O)  ALA: 4(N),5(CA),6(C),7(O)  HOH: 9(O)
-    try std.testing.expectEqual(@as(usize, 9), indices.len);
+    // backbone_names = {N, CA, C, O} — only from protein residues
+    // GLY: 0(N),1(CA),2(C),3(O)  ALA: 4(N),5(CA),6(C),7(O)
+    // HOH O is excluded (not a protein residue)
+    try std.testing.expectEqual(@as(usize, 8), indices.len);
     try std.testing.expectEqual(@as(u32, 0), indices[0]); // GLY-N
     try std.testing.expectEqual(@as(u32, 1), indices[1]); // GLY-CA
     try std.testing.expectEqual(@as(u32, 2), indices[2]); // GLY-C
@@ -369,7 +383,6 @@ test "byKeyword backbone selects N CA C O atoms" {
     try std.testing.expectEqual(@as(u32, 5), indices[5]); // ALA-CA
     try std.testing.expectEqual(@as(u32, 6), indices[6]); // ALA-C
     try std.testing.expectEqual(@as(u32, 7), indices[7]); // ALA-O
-    try std.testing.expectEqual(@as(u32, 9), indices[8]); // HOH-O
 }
 
 test "byKeyword protein excludes water" {

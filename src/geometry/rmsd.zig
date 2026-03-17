@@ -131,33 +131,17 @@ pub fn compute(
     const szy_2 = szy * szy;
     const szx_2 = szx * szx;
 
-    const syzszymsyzsyz = syz * szy - syz * syz;
-    const syzszypsyzsyz = syz * szy + syz * syz;
-
     // c2 = -2 * trace(S^T * S)
     const c2 = -2.0 * (sxx_2 + syy_2 + szz_2 + sxy_2 + syz_2 + sxz_2 +
         syx_2 + szy_2 + szx_2);
 
-    // c1 involves 3x3 determinants and cofactors
-    const c1 = 8.0 * (sxx * (syy * szz - szy * syz) -
-        sxy * (syx * szz - szy * szx) +
-        sxz * (syx * syz - syy * szx)) +
-        8.0 * (sxx * (syz * szy - syzszymsyzsyz + syz_2 - szy_2) +
-            syy * (szx * sxz - szz * sxx + sxz_2 - sxx_2 + sxx_2 - szx_2) +
-            szz * (sxy * syx - sxx * syy + syx_2 - syy_2 + syy_2 - sxy_2));
+    // c1 = -8 * det(S) (Theobald 2005, eq. S3)
+    const det_s = sxx * (syy * szz - syz * szy) -
+        sxy * (syx * szz - syz * szx) +
+        sxz * (syx * szy - syy * szx);
+    const c1 = -8.0 * det_s;
 
-    // c0 = det(K) where K is the 4x4 matrix in Theobald's formulation
-    // We use the simplified form from the QCP paper
-    const sqd = (sxx * syy - sxy * syx) * (sxx * syy - sxy * syx) +
-        (sxx * syz - sxz * syx) * (sxx * syz - sxz * syx) +
-        (sxx * szy - szx * sxy) * (sxx * szy - szx * sxy) +
-        (sxy * syz - sxz * syy) * (sxy * syz - sxz * syy) +
-        (sxy * szy - szx * syy) * (sxy * szy - szx * syy) +
-        (sxz * szy - szx * syz) * (sxz * szy - szx * syz);
-    _ = sqd;
-    _ = syzszypsyzsyz;
-
-    // Compute c0 as det of the 4x4 symmetric K matrix
+    // c0 = det(K) where K is the 4x4 symmetric matrix (Theobald eq. 10)
     // K built from S (see Theobald eq. 10):
     const k00 = sxx + syy + szz;
     const k11 = sxx - syy - szz;

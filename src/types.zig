@@ -170,6 +170,29 @@ pub const Topology = struct {
         self.allocator.free(self.bonds);
     }
 
+    /// Validate cross-reference consistency.
+    /// Call once after populating the topology to catch parser bugs early.
+    pub fn validate(self: Topology) !void {
+        for (self.atoms) |atom| {
+            if (atom.residue_index >= self.residues.len)
+                return error.InvalidResidueIndex;
+        }
+        for (self.residues) |res| {
+            if (res.chain_index >= self.chains.len)
+                return error.InvalidChainIndex;
+            if (res.atom_range.start + res.atom_range.len > self.atoms.len)
+                return error.InvalidAtomRange;
+        }
+        for (self.chains) |chain| {
+            if (chain.residue_range.start + chain.residue_range.len > self.residues.len)
+                return error.InvalidResidueRange;
+        }
+        for (self.bonds) |bond| {
+            if (bond.atom_i >= self.atoms.len or bond.atom_j >= self.atoms.len)
+                return error.InvalidBondIndex;
+        }
+    }
+
     /// Build a flat array of atomic masses (daltons) in atom-index order.
     /// Caller owns the returned slice and must free it with the same allocator.
     pub fn masses(self: Topology, allocator: std.mem.Allocator) ![]f64 {
@@ -241,6 +264,7 @@ pub const Frame = struct {
 
     /// Number of atoms in this frame.
     pub fn nAtoms(self: Frame) usize {
+        std.debug.assert(self.x.len == self.y.len and self.y.len == self.z.len);
         return self.x.len;
     }
 };

@@ -491,6 +491,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
         };
     }
 
+    try topology.validate();
     return types.ParseResult{ .topology = topology, .frame = frame };
 }
 

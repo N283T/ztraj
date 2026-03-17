@@ -398,6 +398,21 @@ fn parseQuartets(allocator: std.mem.Allocator, spec: []const u8) ![][4]u32 {
     return list.toOwnedSlice(allocator);
 }
 
+/// Validate that all atom indices in a tuple array are within bounds.
+fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) void {
+    for (tuples, 0..) |tuple, ti| {
+        for (tuple) |idx| {
+            if (idx >= n_atoms) {
+                std.debug.print(
+                    "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n",
+                    .{ idx, ti, n_atoms },
+                );
+                std.process.exit(1);
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Output: build result in an ArrayList and flush to file/stdout
 // ============================================================================
@@ -603,6 +618,8 @@ fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
     var parsed = try loadTopology(allocator, top_path);
     defer parsed.deinit();
 
+    validateIndices(2, pairs, @intCast(parsed.topology.atoms.len));
+
     const frames = try loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
     defer {
         for (frames) |*f| @constCast(f).deinit();
@@ -675,6 +692,8 @@ fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
     var parsed = try loadTopology(allocator, top_path);
     defer parsed.deinit();
 
+    validateIndices(3, triplets, @intCast(parsed.topology.atoms.len));
+
     const frames = try loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
     defer {
         for (frames) |*f| @constCast(f).deinit();
@@ -745,6 +764,8 @@ fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loadTopology(allocator, top_path);
     defer parsed.deinit();
+
+    validateIndices(4, quartets, @intCast(parsed.topology.atoms.len));
 
     const frames = try loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
     defer {

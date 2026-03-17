@@ -8,8 +8,8 @@
 //! Endianness is auto-detected from the first int32 (expected value: 84).
 //! Both little-endian and big-endian files are supported.
 //!
-//! Adapted from /Users/nagaet/freesasa-zig/src/dcd.zig, modified to yield
-//! ztraj Frame values in SOA layout (separate x/y/z slices).
+//! Adapted from freesasa-zig DCD reader, modified to yield ztraj Frame
+//! values in SOA layout (separate x/y/z slices).
 
 const std = @import("std");
 const types = @import("../types.zig");
