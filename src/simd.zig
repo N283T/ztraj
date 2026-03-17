@@ -10,7 +10,6 @@ pub const lee_richards = @import("simd/lee_richards.zig");
 pub const Vec3Gen = vec.Vec3Gen;
 pub const Vec3 = vec.Vec3;
 pub const Vec3f32 = vec.Vec3f32;
-pub const Epsilon = vec.Epsilon;
 pub const cpu_features = vec.cpu_features;
 pub const optimal_vector_width = vec.optimal_vector_width;
 
