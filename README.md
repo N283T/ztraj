@@ -3,6 +3,7 @@
 [![CI](https://github.com/N283T/ztraj/actions/workflows/ci.yml/badge.svg)](https://github.com/N283T/ztraj/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pyztraj)](https://pypi.org/project/pyztraj/)
 [![Zig](https://img.shields.io/badge/Zig-0.15.2-f7a41d?logo=zig)](https://ziglang.org/)
+[![Python](https://img.shields.io/pypi/pyversions/pyztraj)](https://pypi.org/project/pyztraj/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 High-performance molecular dynamics trajectory analysis library and CLI, written in Zig with Python bindings.
