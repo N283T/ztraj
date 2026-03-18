@@ -1,8 +1,9 @@
-"""Custom build hook to compile Zig shared library during pip install."""
+"""Custom build hook to compile Zig library and CLI binary during pip install."""
 
 from __future__ import annotations
 
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -12,18 +13,19 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 class ZigBuildHook(BuildHookInterface):
-    """Build hook that compiles the Zig shared library before packaging."""
+    """Build hook that compiles the Zig shared library and CLI binary before packaging."""
 
     PLUGIN_NAME = "zig-build"
 
     def initialize(self, version: str, build_data: dict[str, Any]) -> None:
-        """Build the Zig shared library and copy it to the package directory."""
+        """Build the Zig library and CLI binary, then copy them to the package directory."""
         build_data["infer_tag"] = True
 
         root_dir = Path(self.root).parent  # Go up from python/ to project root
         python_dir = Path(self.root)
         package_dir = python_dir / "pyztraj"
 
+        # Platform-specific names
         if sys.platform == "darwin":
             lib_name = "libztraj.dylib"
         elif sys.platform == "win32":
@@ -31,19 +33,35 @@ class ZigBuildHook(BuildHookInterface):
         else:
             lib_name = "libztraj.so"
 
+        exe_name = "ztraj.exe" if sys.platform == "win32" else "ztraj"
+
+        # Source paths (zig-out/)
         if sys.platform == "win32":
             lib_src = root_dir / "zig-out" / "bin" / lib_name
         else:
             lib_src = root_dir / "zig-out" / "lib" / lib_name
+        exe_src = root_dir / "zig-out" / "bin" / exe_name
 
+        # Destination paths (pyztraj/)
         lib_dst = package_dir / lib_name
+        exe_dst = package_dir / exe_name
 
-        if self._needs_build(lib_src, lib_dst):
+        # Build if needed
+        needs_build = self._needs_build(lib_src, lib_dst) or self._needs_build(exe_src, exe_dst)
+        if needs_build:
             self._build_zig(root_dir)
 
+        # Copy library
         self._copy_artifact(lib_src, lib_dst, "shared library")
 
+        # Copy CLI binary
+        self._copy_artifact(exe_src, exe_dst, "CLI binary")
+        if sys.platform != "win32":
+            exe_dst.chmod(exe_dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+        # Include both artifacts in the wheel
         build_data["force_include"][str(lib_dst)] = f"pyztraj/{lib_name}"
+        build_data["force_include"][str(exe_dst)] = f"pyztraj/{exe_name}"
 
     def _needs_build(self, src: Path, dst: Path) -> bool:
         """Check if a build is needed based on file existence and timestamps."""
@@ -82,7 +100,7 @@ class ZigBuildHook(BuildHookInterface):
 
     def _build_zig(self, root_dir: Path) -> None:
         """Run zig build command."""
-        self.app.display_info("Building Zig shared library...")
+        self.app.display_info("Building Zig library and CLI binary...")
 
         zig_cmd = self._find_zig()
         if not zig_cmd:
@@ -101,7 +119,7 @@ class ZigBuildHook(BuildHookInterface):
                 text=True,
                 timeout=600,
             )
-            self.app.display_success("Zig shared library built successfully")
+            self.app.display_success("Zig library and CLI binary built successfully")
         except subprocess.CalledProcessError as e:
             msg = f"Zig build failed:\n{e.stderr}"
             self.app.display_error(msg)

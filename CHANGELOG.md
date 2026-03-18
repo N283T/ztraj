@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0] - 2026-03-18
 
 ### Added
 - Python bindings package `pyztraj` with CFFI-based NumPy API
@@ -12,6 +12,7 @@
   - Analysis: `detect_hbonds`, `compute_contacts`, `compute_rdf`
 - C API layer (`src/c_api.zig`) with shared library build target
 - Hatchling build hook for automatic Zig compilation during `pip install`
+- Bundled CLI binary in PyPI wheel (`pip install pyztraj` installs `ztraj` command)
 - GitHub Actions CI (format check, build, Python tests, validation suite)
 - GitHub Actions publish workflow (cibuildwheel, PyPI, GitHub Releases)
 - Validation suite against mdtraj reference values (9/9 metrics)
