@@ -30,9 +30,7 @@ class TestDistances:
         np.testing.assert_allclose(result[0], 5.0, atol=1e-5)
 
     def test_multiple_pairs(self):
-        coords = np.array(
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32
-        )
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32)
         pairs = np.array([[0, 1], [0, 2], [1, 2]], dtype=np.uint32)
         result = pyztraj.compute_distances(coords, pairs)
         assert result.shape == (3,)
@@ -49,18 +47,14 @@ class TestDistances:
 
 class TestAngles:
     def test_right_angle(self):
-        coords = np.array(
-            [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
-        )
+        coords = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
         triplets = np.array([[0, 1, 2]], dtype=np.uint32)
         result = pyztraj.compute_angles(coords, triplets)
         assert result.shape == (1,)
         np.testing.assert_allclose(result[0], np.pi / 2, atol=1e-5)
 
     def test_straight_angle(self):
-        coords = np.array(
-            [[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32
-        )
+        coords = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
         triplets = np.array([[0, 1, 2]], dtype=np.uint32)
         result = pyztraj.compute_angles(coords, triplets)
         np.testing.assert_allclose(result[0], np.pi, atol=1e-5)
@@ -81,25 +75,19 @@ class TestDihedrals:
 
 class TestRMSD:
     def test_identical_structures(self):
-        coords = np.array(
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
-        )
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
         rmsd = pyztraj.compute_rmsd(coords, coords)
         assert rmsd == pytest.approx(0.0, abs=1e-10)
 
     def test_translated(self):
-        ref = np.array(
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
-        )
+        ref = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
         # QCP centers both structures, so pure translation -> RMSD 0
         shifted = ref + np.array([10.0, 20.0, 30.0], dtype=np.float32)
         rmsd = pyztraj.compute_rmsd(shifted, ref)
         assert rmsd == pytest.approx(0.0, abs=1e-6)
 
     def test_with_atom_indices(self):
-        coords = np.array(
-            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32
-        )
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
         # Using only first 2 atoms
         rmsd = pyztraj.compute_rmsd(coords, coords, atom_indices=np.array([0, 1], dtype=np.uint32))
         assert rmsd == pytest.approx(0.0, abs=1e-10)
@@ -155,6 +143,35 @@ class TestInertia:
         tensor = np.diag([1.0, 2.0, 3.0])
         moments = pyztraj.compute_principal_moments(tensor)
         np.testing.assert_allclose(moments, [1.0, 2.0, 3.0], atol=1e-10)
+
+
+class TestRMSF:
+    def test_static_structure(self):
+        # All frames identical -> RMSF should be 0
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
+        frames = [coords, coords, coords]
+        result = pyztraj.compute_rmsf(frames)
+        assert result.shape == (2,)
+        np.testing.assert_allclose(result, [0.0, 0.0], atol=1e-10)
+
+    def test_oscillating_atom(self):
+        # Atom 0 oscillates: x = -1, +1, -1 -> mean = -1/3, RMSF > 0
+        f1 = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.float32)
+        f2 = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.float32)
+        f3 = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=np.float32)
+        result = pyztraj.compute_rmsf([f1, f2, f3])
+        assert result[0] > 0.0  # Atom 0 fluctuates
+        np.testing.assert_allclose(result[1], 0.0, atol=1e-10)  # Atom 1 static
+
+    def test_with_atom_indices(self):
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float32)
+        frames = [coords, coords]
+        result = pyztraj.compute_rmsf(frames, atom_indices=np.array([0, 2], dtype=np.uint32))
+        assert result.shape == (2,)  # Only 2 atoms selected
+
+    def test_empty_frames_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            pyztraj.compute_rmsf([])
 
 
 class TestLoadPDB:

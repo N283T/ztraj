@@ -9,12 +9,12 @@ import cffi
 
 _CDEF = """
     // Error codes
-    static const int ZTRAJ_OK;
-    static const int ZTRAJ_ERROR_INVALID_INPUT;
-    static const int ZTRAJ_ERROR_OUT_OF_MEMORY;
-    static const int ZTRAJ_ERROR_FILE_IO;
-    static const int ZTRAJ_ERROR_PARSE;
-    static const int ZTRAJ_ERROR_EOF;
+    #define ZTRAJ_OK 0
+    #define ZTRAJ_ERROR_INVALID_INPUT -1
+    #define ZTRAJ_ERROR_OUT_OF_MEMORY -2
+    #define ZTRAJ_ERROR_FILE_IO -3
+    #define ZTRAJ_ERROR_PARSE -4
+    #define ZTRAJ_ERROR_EOF -5
 
     // Version
     const char* ztraj_version(void);
@@ -85,7 +85,7 @@ _ffi.cdef(_CDEF)
 _lib = None
 
 
-def _load_library() -> cffi.FFI:
+def _load_library():
     """Load the libztraj shared library."""
     global _lib  # noqa: PLW0603
     if _lib is not None:
@@ -104,17 +104,26 @@ def _load_library() -> cffi.FFI:
     if not lib_path.exists():
         msg = (
             f"Shared library not found at {lib_path}. "
-            "Run 'zig build -Doptimize=ReleaseFast' from the project root, "
-            "then copy the library to the pyztraj package directory."
+            "Install with 'pip install .' from the python/ directory, or build "
+            "manually with 'zig build -Doptimize=ReleaseFast' and copy the "
+            "library to the pyztraj package directory."
         )
         raise FileNotFoundError(msg)
 
-    _lib = _ffi.dlopen(str(lib_path))
+    try:
+        _lib = _ffi.dlopen(str(lib_path))
+    except OSError as e:
+        msg = (
+            f"Failed to load shared library at {lib_path}: {e}. "
+            "This may indicate an architecture mismatch or ABI incompatibility. "
+            "Try rebuilding: 'zig build -Doptimize=ReleaseFast'"
+        )
+        raise OSError(msg) from e
     return _lib
 
 
-def get_lib() -> cffi.FFI:
-    """Get the loaded library instance."""
+def get_lib():
+    """Get the loaded C library instance."""
     return _load_library()
 
 

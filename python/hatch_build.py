@@ -103,5 +103,12 @@ class ZigBuildHook(BuildHookInterface):
             )
             self.app.display_success("Zig shared library built successfully")
         except subprocess.CalledProcessError as e:
-            self.app.display_error(f"Zig build failed:\n{e.stderr}")
-            raise RuntimeError("Zig build failed") from e
+            msg = f"Zig build failed:\n{e.stderr}"
+            self.app.display_error(msg)
+            raise RuntimeError(msg) from e
+        except subprocess.TimeoutExpired as e:
+            msg = (
+                "Zig build timed out after 600 seconds. "
+                "Try building manually: cd <root> && zig build -Doptimize=ReleaseFast"
+            )
+            raise RuntimeError(msg) from e

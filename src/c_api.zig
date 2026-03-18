@@ -52,6 +52,9 @@ export fn ztraj_version() callconv(.c) [*:0]const u8 {
 
 const c_allocator = std.heap.c_allocator;
 
+/// Maximum PDB file size (100 MiB) to prevent excessive memory allocation.
+const MAX_PDB_FILE_SIZE = 100 * 1024 * 1024;
+
 // =============================================================================
 // Geometry: Distances
 // =============================================================================
@@ -70,6 +73,13 @@ export fn ztraj_distances(
     result: [*]f32,
 ) callconv(.c) c_int {
     if (n_pairs == 0) return ZTRAJ_OK;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    // Bounds-check indices
+    const flat = pairs[0 .. n_pairs * 2];
+    for (flat) |idx| {
+        if (idx >= n_atoms) return ZTRAJ_ERROR_INVALID_INPUT;
+    }
 
     const pairs_slice: [*]const [2]u32 = @ptrCast(@alignCast(pairs));
     distances_mod.compute(
@@ -101,6 +111,12 @@ export fn ztraj_angles(
     result: [*]f32,
 ) callconv(.c) c_int {
     if (n_triplets == 0) return ZTRAJ_OK;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const flat = triplets[0 .. n_triplets * 3];
+    for (flat) |idx| {
+        if (idx >= n_atoms) return ZTRAJ_ERROR_INVALID_INPUT;
+    }
 
     const triplets_slice: [*]const [3]u32 = @ptrCast(@alignCast(triplets));
     angles_mod.compute(
@@ -132,6 +148,12 @@ export fn ztraj_dihedrals(
     result: [*]f32,
 ) callconv(.c) c_int {
     if (n_quartets == 0) return ZTRAJ_OK;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const flat = quartets[0 .. n_quartets * 4];
+    for (flat) |idx| {
+        if (idx >= n_atoms) return ZTRAJ_ERROR_INVALID_INPUT;
+    }
 
     const quartets_slice: [*]const [4]u32 = @ptrCast(@alignCast(quartets));
     dihedrals_mod.compute(
@@ -404,7 +426,10 @@ export fn ztraj_rmsf(
     else
         null;
 
-    // Build Frame slice from flat contiguous data
+    // Build Frame slice from flat contiguous data.
+    // SAFETY: @constCast is safe here because rmsf_mod.compute only reads
+    // frame coordinates (verified in rmsf.zig). Frame.x/y/z are declared
+    // as []f32 (mutable) but RMSF never writes to them.
     const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
     defer c_allocator.free(frames);
 
@@ -441,18 +466,31 @@ export fn ztraj_rmsf(
 // I/O: PDB Loading (opaque handle)
 // =============================================================================
 
+/// Magic number for handle type validation.
+const STRUCTURE_MAGIC: u64 = 0xDEAD_BEEF_5DB0_0001;
+const XTC_MAGIC: u64 = 0xDEAD_BEEF_58C0_0001;
+
 /// Opaque structure handle returned by ztraj_load_pdb.
 const StructureHandle = struct {
+    magic: u64 = STRUCTURE_MAGIC,
     parse_result: types.ParseResult,
     masses: []f64,
     allocator: std.mem.Allocator,
 
     fn deinit(self: *StructureHandle) void {
+        self.magic = 0; // Invalidate to detect double-free
         self.allocator.free(self.masses);
         self.parse_result.deinit();
         self.allocator.destroy(self);
     }
 };
+
+/// Validate and cast a structure handle. Returns null if invalid.
+fn castStructureHandle(handle: ?*anyopaque) ?*StructureHandle {
+    const h: *StructureHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != STRUCTURE_MAGIC) return null;
+    return h;
+}
 
 /// Load a PDB file and return an opaque handle.
 ///
@@ -466,7 +504,7 @@ export fn ztraj_load_pdb(
 
     // Read file
     const path_slice = std.mem.sliceTo(path, 0);
-    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, 100 * 1024 * 1024) catch {
+    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     defer c_allocator.free(data);
@@ -497,21 +535,21 @@ export fn ztraj_load_pdb(
     return ZTRAJ_OK;
 }
 
-/// Get number of atoms from a loaded structure.
-export fn ztraj_get_n_atoms(handle: *anyopaque) callconv(.c) usize {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+/// Get number of atoms from a loaded structure. Returns 0 on invalid handle.
+export fn ztraj_get_n_atoms(handle: ?*anyopaque) callconv(.c) usize {
+    const h = castStructureHandle(handle) orelse return 0;
     return h.parse_result.frame.nAtoms();
 }
 
 /// Copy coordinates from a loaded structure into caller-owned buffers.
 /// Buffers must have at least n_atoms elements each.
 export fn ztraj_get_coords(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     x: [*]f32,
     y: [*]f32,
     z: [*]f32,
 ) callconv(.c) c_int {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const frame = h.parse_result.frame;
     const n = frame.nAtoms();
 
@@ -525,10 +563,10 @@ export fn ztraj_get_coords(
 /// Copy masses from a loaded structure into a caller-owned buffer.
 /// Buffer must have at least n_atoms elements.
 export fn ztraj_get_masses(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     masses: [*]f64,
 ) callconv(.c) c_int {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const n = h.masses.len;
     @memcpy(masses[0..n], h.masses);
     return ZTRAJ_OK;
@@ -537,10 +575,10 @@ export fn ztraj_get_masses(
 /// Copy atom names from a loaded structure.
 /// `names` must point to n_atoms * 4 bytes (each name is 4 bytes, space-padded).
 export fn ztraj_get_atom_names(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     names: [*]u8,
 ) callconv(.c) c_int {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const atoms = h.parse_result.topology.atoms;
     for (atoms, 0..) |atom, i| {
         const offset = i * 4;
@@ -556,10 +594,10 @@ export fn ztraj_get_atom_names(
 /// Copy residue names from a loaded structure (per-atom).
 /// `names` must point to n_atoms * 5 bytes (each name is 5 bytes, space-padded).
 export fn ztraj_get_residue_names(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     names: [*]u8,
 ) callconv(.c) c_int {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
     for (topo.atoms, 0..) |atom, i| {
         const offset = i * 5;
@@ -575,10 +613,10 @@ export fn ztraj_get_residue_names(
 /// Copy residue IDs (sequence numbers) from a loaded structure (per-atom).
 /// `resids` must have at least n_atoms elements.
 export fn ztraj_get_resids(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     resids: [*]i32,
 ) callconv(.c) c_int {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
     for (topo.atoms, 0..) |atom, i| {
         resids[i] = topo.residues[atom.residue_index].resid;
@@ -586,9 +624,9 @@ export fn ztraj_get_resids(
     return ZTRAJ_OK;
 }
 
-/// Free a structure handle returned by ztraj_load_pdb.
-export fn ztraj_free_structure(handle: *anyopaque) callconv(.c) void {
-    const h: *StructureHandle = @ptrCast(@alignCast(handle));
+/// Free a structure handle returned by ztraj_load_pdb. Safe to call with null.
+export fn ztraj_free_structure(handle: ?*anyopaque) callconv(.c) void {
+    const h = castStructureHandle(handle) orelse return;
     h.deinit();
 }
 
@@ -598,14 +636,23 @@ export fn ztraj_free_structure(handle: *anyopaque) callconv(.c) void {
 
 /// Opaque XTC reader handle.
 const XtcHandle = struct {
+    magic: u64 = XTC_MAGIC,
     reader: xtc_mod.XtcReader,
     allocator: std.mem.Allocator,
 
     fn deinit(self: *XtcHandle) void {
+        self.magic = 0;
         self.reader.deinit();
         self.allocator.destroy(self);
     }
 };
+
+/// Validate and cast an XTC handle. Returns null if invalid.
+fn castXtcHandle(handle: ?*anyopaque) ?*XtcHandle {
+    const h: *XtcHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != XTC_MAGIC) return null;
+    return h;
+}
 
 /// Open an XTC file for streaming frame-by-frame reading.
 ///
@@ -644,17 +691,20 @@ export fn ztraj_open_xtc(
 /// Coordinates are in angstroms (converted from nm at read time).
 /// `x`, `y`, `z` must have at least n_atoms elements.
 export fn ztraj_read_xtc_frame(
-    handle: *anyopaque,
+    handle: ?*anyopaque,
     x: [*]f32,
     y: [*]f32,
     z: [*]f32,
     time: *f32,
     step: *i32,
 ) callconv(.c) c_int {
-    const h: *XtcHandle = @ptrCast(@alignCast(handle));
+    const h = castXtcHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
 
-    const frame_ptr = h.reader.next() catch {
-        return ZTRAJ_ERROR_FILE_IO;
+    const frame_ptr = h.reader.next() catch |err| {
+        return switch (err) {
+            xtc_mod.XtcReadError.InvalidMagic, xtc_mod.XtcReadError.DecompressionError => ZTRAJ_ERROR_PARSE,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
     };
 
     if (frame_ptr) |frame| {
@@ -670,9 +720,9 @@ export fn ztraj_read_xtc_frame(
     }
 }
 
-/// Close an XTC reader handle.
-export fn ztraj_close_xtc(handle: *anyopaque) callconv(.c) void {
-    const h: *XtcHandle = @ptrCast(@alignCast(handle));
+/// Close an XTC reader handle. Safe to call with null.
+export fn ztraj_close_xtc(handle: ?*anyopaque) callconv(.c) void {
+    const h = castXtcHandle(handle) orelse return;
     h.deinit();
 }
 
