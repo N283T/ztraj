@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'plans/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'plans/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    name: Format check
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Check formatting
+        run: zig fmt --check src/
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: macos-latest
+            name: macOS
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.name }})
+    needs: [fmt]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Run tests
+        run: zig build test
+
+      - name: Build Release
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Test CLI
+        run: |
+          ./zig-out/bin/ztraj --help
+          ./zig-out/bin/ztraj --version
+
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+            lib: libztraj.so
+          - os: macos-latest
+            name: macOS
+            lib: libztraj.dylib
+
+    runs-on: ${{ matrix.os }}
+    name: Python (${{ matrix.name }})
+    needs: [fmt]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build shared library
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Check shared library exists
+        run: |
+          ls -la ./zig-out/lib/${{ matrix.lib }}
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+
+      - name: Install Python package
+        working-directory: python
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Run Python tests
+        working-directory: python
+        run: pytest tests/ -v
+
+      - name: Run linter
+        working-directory: python
+        run: |
+          ruff check pyztraj/
+          ruff format --check pyztraj/
+
+      - name: Test import
+        run: |
+          python3 -c "
+          import pyztraj
+          print(f'pyztraj version: {pyztraj.get_version()}')
+          "
+
+  validate:
+    runs-on: ubuntu-latest
+    name: Validation suite
+    needs: [build]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build Release
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
+
+      - name: Run validation suite
+        run: uv run --with numpy --script validation/validate.py

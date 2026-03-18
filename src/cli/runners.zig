@@ -98,8 +98,12 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(rmsd_vals);
     for (frames, 0..) |frame, fi| {
         rmsd_vals[fi] = geometry.rmsd.compute(
-            ref.x, ref.y, ref.z,
-            frame.x, frame.y, frame.z,
+            ref.x,
+            ref.y,
+            ref.z,
+            frame.x,
+            frame.y,
+            frame.z,
             atom_indices,
         );
     }
@@ -568,8 +572,8 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
                 defer allocator.free(bonds);
                 for (bonds) |hb| {
                     try w.print("{d}{c}{d}{c}{d}{c}{d}{c}{d:.4}{c}{d:.4}\n", .{
-                        fi, delim, hb.donor, delim, hb.hydrogen, delim, hb.acceptor,
-                        delim, hb.distance, delim, hb.angle,
+                        fi,    delim,       hb.donor, delim,    hb.hydrogen, delim, hb.acceptor,
+                        delim, hb.distance, delim,    hb.angle,
                     });
                 }
             }
@@ -613,7 +617,11 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
             try w.writeAll("[\n");
             for (frames, 0..) |frame, fi| {
                 const ctcts = try analysis.contacts.compute(
-                    allocator, parsed.topology, frame, scheme, args.contacts_cutoff,
+                    allocator,
+                    parsed.topology,
+                    frame,
+                    scheme,
+                    args.contacts_cutoff,
                 );
                 defer allocator.free(ctcts);
                 if (fi > 0) try w.writeAll(",\n");
@@ -634,7 +642,11 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
             try w.print("frame{c}residue_i{c}residue_j{c}distance\n", .{ delim, delim, delim });
             for (frames, 0..) |frame, fi| {
                 const ctcts = try analysis.contacts.compute(
-                    allocator, parsed.topology, frame, scheme, args.contacts_cutoff,
+                    allocator,
+                    parsed.topology,
+                    frame,
+                    scheme,
+                    args.contacts_cutoff,
                 );
                 defer allocator.free(ctcts);
                 for (ctcts) |ct| {
@@ -763,7 +775,15 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
         };
 
         var result = try analysis.rdf.compute(
-            allocator, s1x, s1y, s1z, s2x, s2y, s2z, box_vol, cfg,
+            allocator,
+            s1x,
+            s1y,
+            s1z,
+            s2x,
+            s2y,
+            s2z,
+            box_vol,
+            cfg,
         );
         defer result.deinit();
 

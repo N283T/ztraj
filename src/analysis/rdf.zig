@@ -133,7 +133,7 @@ pub fn compute(
         // Volume of the spherical shell [r, r+dr).
         const shell_vol: f64 = (4.0 / 3.0) * std.math.pi *
             ((r_center + 0.5 * bin_width) * (r_center + 0.5 * bin_width) * (r_center + 0.5 * bin_width) -
-            (r_center - 0.5 * bin_width) * (r_center - 0.5 * bin_width) * (r_center - 0.5 * bin_width));
+                (r_center - 0.5 * bin_width) * (r_center - 0.5 * bin_width) * (r_center - 0.5 * bin_width));
 
         // Expected count in this shell for an ideal gas.
         const expected: f64 = rho * shell_vol * n_sel1;
@@ -168,8 +168,12 @@ test "rdf: bin centers are correct" {
 
     var result = try compute(
         allocator,
-        &x, &y, &z,
-        &x, &y, &z,
+        &x,
+        &y,
+        &z,
+        &x,
+        &y,
+        &z,
         1000.0,
         .{ .r_min = 0.0, .r_max = 10.0, .n_bins = 10 },
     );
@@ -198,8 +202,12 @@ test "rdf: two atoms at known distance produce peak in correct bin" {
     // Use a large box volume so rho is tiny and normalization doesn't obscure peak.
     var result = try compute(
         allocator,
-        &sel1_x, &sel1_y, &sel1_z,
-        &sel2_x, &sel2_y, &sel2_z,
+        &sel1_x,
+        &sel1_y,
+        &sel1_z,
+        &sel2_x,
+        &sel2_y,
+        &sel2_z,
         1e9,
         .{ .r_min = 0.0, .r_max = 10.0, .n_bins = 10 },
     );
@@ -243,8 +251,12 @@ test "rdf: uniform distribution approaches g(r)=1 at large r" {
 
     var result = try compute(
         allocator,
-        &xs, &ys, &zs,
-        &xs, &ys, &zs,
+        &xs,
+        &ys,
+        &zs,
+        &xs,
+        &ys,
+        &zs,
         box_vol,
         .{ .r_min = 0.0, .r_max = 20.0, .n_bins = 50 },
     );
@@ -274,8 +286,12 @@ test "rdf: g_r length matches n_bins" {
 
     var result = try compute(
         allocator,
-        &x, &y, &z,
-        &x, &y, &z,
+        &x,
+        &y,
+        &z,
+        &x,
+        &y,
+        &z,
         1000.0,
         .{ .r_min = 0.0, .r_max = 5.0, .n_bins = 25 },
     );
@@ -299,8 +315,12 @@ test "rdf: atoms outside [r_min, r_max) are excluded" {
 
     var result = try compute(
         allocator,
-        &sel1_x, &sel1_y, &sel1_z,
-        &sel2_x, &sel2_y, &sel2_z,
+        &sel1_x,
+        &sel1_y,
+        &sel1_z,
+        &sel2_x,
+        &sel2_y,
+        &sel2_z,
         1000.0,
         .{ .r_min = 0.0, .r_max = 10.0, .n_bins = 10 },
     );
