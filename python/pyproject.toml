@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyztraj"
+version = "0.1.0"
+description = "Fast molecular dynamics trajectory analysis powered by Zig"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Tsubasa Nagae" }]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = ["numpy>=1.24", "cffi>=1.15"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=4.0", "ruff>=0.5", "ty>=0.0.1a0"]
+
+[project.urls]
+Repository = "https://github.com/N283T/ztraj"
+Issues = "https://github.com/N283T/ztraj/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyztraj"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.cibuildwheel]
+build = ["cp311-*", "cp312-*", "cp313-*"]
+skip = ["*-win32", "*-win_arm64", "*-musllinux_*", "*_s390x", "*_ppc64le"]
+test-requires = ["pytest", "numpy"]
+test-command = "pytest {project}/python/tests -x -q"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+before-all = "curl -sSfL https://ziglang.org/download/0.15.2/zig-$(uname -m)-linux-0.15.2.tar.xz | tar -xJ -C /usr/local && ln -sf /usr/local/zig-$(uname -m)-linux-0.15.2/zig /usr/local/bin/zig && zig build -Doptimize=ReleaseFast"
+
+[tool.cibuildwheel.macos]
+before-all = "zig build -Doptimize=ReleaseFast"
+repair-wheel-command = ""
+
+[tool.cibuildwheel.macos.environment]
+MACOSX_DEPLOYMENT_TARGET = "11.0"
+
+[tool.cibuildwheel.windows]
+before-all = "zig build -Doptimize=ReleaseFast"
+repair-wheel-command = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

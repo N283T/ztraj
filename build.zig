@@ -21,6 +21,22 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // Shared library (C API for Python bindings)
+    const lib = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "ztraj",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/c_api.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zxdrfile", .module = zxdrfile_mod },
+            },
+        }),
+    });
+    lib.linkLibC();
+    b.installArtifact(lib);
+
     // CLI executable
     const options = b.addOptions();
     options.addOption([]const u8, "version", version);
@@ -55,6 +71,11 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&b.addRunArtifact(mod_tests).step);
     test_step.dependOn(&b.addRunArtifact(exe_tests).step);
+
+    // C API: tests are verified via Python integration tests.
+    // The shared library compiles c_api.zig; Zig-level c_api tests cannot run
+    // as a separate module because pdb.zig's @embedFile uses relative paths
+    // that go outside the c_api module's package root.
 
     // Docs step (zig autodoc)
     const docs_lib = b.addLibrary(.{
