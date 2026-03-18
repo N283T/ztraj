@@ -138,13 +138,10 @@ fn parseAtomLine(line: []const u8, is_hetatm: bool) ?RawAtom {
     const ins_code: u8 = if (line.len > 26) line[26] else ' ';
 
     // Element symbol (cols 77-78, 0-indexed 76-78)
-    const element: elem.Element = if (line.len >= 78)
-        blk: {
-            const sym = std.mem.trim(u8, line[76..78], " ");
-            break :blk if (sym.len > 0) elem.fromSymbol(sym) else inferElement(name_raw);
-        }
-    else
-        inferElement(name_raw);
+    const element: elem.Element = if (line.len >= 78) blk: {
+        const sym = std.mem.trim(u8, line[76..78], " ");
+        break :blk if (sym.len > 0) elem.fromSymbol(sym) else inferElement(name_raw);
+    } else inferElement(name_raw);
 
     // Atom serial (cols 7-11, 0-indexed 6-11)
     const serial_str = if (line.len >= 11) std.mem.trim(u8, line[6..11], " ") else "0";

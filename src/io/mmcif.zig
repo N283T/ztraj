@@ -129,7 +129,10 @@ fn parseFloat(s: []const u8) !f32 {
     if (cif.isNull(s)) return ParseError.InvalidCoordinate;
     var end = s.len;
     for (s, 0..) |c, i| {
-        if (c == '(') { end = i; break; }
+        if (c == '(') {
+            end = i;
+            break;
+        }
     }
     const v = std.fmt.parseFloat(f64, s[0..end]) catch return ParseError.InvalidCoordinate;
     return @floatCast(v);
@@ -395,8 +398,14 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
         else
             true;
 
-        if (chain_changed) { n_chains += 1; prev_chain = ra.chain_id; }
-        if (res_changed) { n_residues += 1; prev_res = res_key; }
+        if (chain_changed) {
+            n_chains += 1;
+            prev_chain = ra.chain_id;
+        }
+        if (res_changed) {
+            n_residues += 1;
+            prev_res = res_key;
+        }
     }
 
     const n_atoms: u32 = @intCast(raw_atoms.items.len);

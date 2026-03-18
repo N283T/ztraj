@@ -281,9 +281,15 @@ test "hbonds: non-donor atom bonded to H — no bond detected" {
 
     var frame = try types.Frame.init(allocator, 3);
     defer frame.deinit();
-    frame.x[0] = 0.0; frame.y[0] = 0.0; frame.z[0] = 0.0; // C
-    frame.x[1] = 1.0; frame.y[1] = 0.0; frame.z[1] = 0.0; // H
-    frame.x[2] = 2.3; frame.y[2] = 0.0; frame.z[2] = 0.0; // O
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0; // C
+    frame.x[1] = 1.0;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0; // H
+    frame.x[2] = 2.3;
+    frame.y[2] = 0.0;
+    frame.z[2] = 0.0; // O
 
     const bonds = try detect(allocator, topo, frame, .{});
     defer allocator.free(bonds);
@@ -323,9 +329,15 @@ test "hbonds: sulfur acceptor is detected" {
 
     var frame = try types.Frame.init(allocator, 3);
     defer frame.deinit();
-    frame.x[0] = 0.0; frame.y[0] = 0.0; frame.z[0] = 0.0;
-    frame.x[1] = 1.0; frame.y[1] = 0.0; frame.z[1] = 0.0;
-    frame.x[2] = 2.3; frame.y[2] = 0.0; frame.z[2] = 0.0;
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0;
+    frame.x[1] = 1.0;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0;
+    frame.x[2] = 2.3;
+    frame.y[2] = 0.0;
+    frame.z[2] = 0.0;
 
     const bonds = try detect(allocator, topo, frame, .{});
     defer allocator.free(bonds);

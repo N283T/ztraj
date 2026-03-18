@@ -185,8 +185,12 @@ fn makeTwoResidueSystem(
     var frame = try types.Frame.init(allocator, 2);
     errdefer frame.deinit();
 
-    frame.x[0] = pos0[0]; frame.y[0] = pos0[1]; frame.z[0] = pos0[2];
-    frame.x[1] = pos1[0]; frame.y[1] = pos1[1]; frame.z[1] = pos1[2];
+    frame.x[0] = pos0[0];
+    frame.y[0] = pos0[1];
+    frame.z[0] = pos0[2];
+    frame.x[1] = pos1[0];
+    frame.y[1] = pos1[1];
+    frame.z[1] = pos1[2];
 
     return .{ .topo = topo, .frame = frame };
 }
@@ -261,9 +265,15 @@ test "contacts: ca scheme picks CA atoms" {
 
     var frame = try types.Frame.init(allocator, 3);
     defer frame.deinit();
-    frame.x[0] = 0.0; frame.y[0] = 0.0; frame.z[0] = 0.0; // CA res 0
-    frame.x[1] = 0.0; frame.y[1] = 0.0; frame.z[1] = 0.0; // CB res 0 (same pos)
-    frame.x[2] = 3.0; frame.y[2] = 0.0; frame.z[2] = 0.0; // CA res 1
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0; // CA res 0
+    frame.x[1] = 0.0;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0; // CB res 0 (same pos)
+    frame.x[2] = 3.0;
+    frame.y[2] = 0.0;
+    frame.z[2] = 0.0; // CA res 1
 
     const contacts = try compute(allocator, topo, frame, .ca, 5.0);
     defer allocator.free(contacts);
@@ -312,9 +322,15 @@ test "contacts: closest_heavy excludes hydrogen" {
 
     var frame = try types.Frame.init(allocator, 3);
     defer frame.deinit();
-    frame.x[0] = 0.0; frame.y[0] = 0.0; frame.z[0] = 0.0; // CA res 0
-    frame.x[1] = 0.5; frame.y[1] = 0.0; frame.z[1] = 0.0; // H  res 0
-    frame.x[2] = 3.0; frame.y[2] = 0.0; frame.z[2] = 0.0; // N  res 1
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0; // CA res 0
+    frame.x[1] = 0.5;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0; // H  res 0
+    frame.x[2] = 3.0;
+    frame.y[2] = 0.0;
+    frame.z[2] = 0.0; // N  res 1
 
     // closest_heavy: CA...N = 3.0, within cutoff 4.0.
     const contacts_h = try compute(allocator, topo, frame, .closest_heavy, 4.0);
@@ -374,8 +390,12 @@ test "contacts: ca scheme — missing CA returns no contact" {
 
     var frame = try types.Frame.init(allocator, 2);
     defer frame.deinit();
-    frame.x[0] = 0.0; frame.y[0] = 0.0; frame.z[0] = 0.0;
-    frame.x[1] = 1.0; frame.y[1] = 0.0; frame.z[1] = 0.0;
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0;
+    frame.x[1] = 1.0;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0;
 
     const contacts = try compute(allocator, topo, frame, .ca, 5.0);
     defer allocator.free(contacts);
