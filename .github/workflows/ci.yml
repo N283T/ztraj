@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -67,7 +67,7 @@ jobs:
           version: 0.15.2
 
       - name: Run tests
-        run: zig build test || true  # mmap_reader test has known path issue (#5)
+        run: zig build test
 
       - name: Build Release
         run: zig build -Doptimize=ReleaseFast
@@ -96,7 +96,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -111,12 +111,12 @@ jobs:
           ls -la ./zig-out/lib/${{ matrix.lib }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Install Python package
         working-directory: python
@@ -147,7 +147,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -158,7 +158,7 @@ jobs:
         run: zig build -Doptimize=ReleaseFast
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@e4db8464a088ece1b920f60402e813ea4de65b8f # v4
 
       - name: Run validation suite
         run: uv run --with numpy --script validation/validate.py

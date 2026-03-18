@@ -51,6 +51,7 @@ pip install .
 ### Usage
 
 ```python
+import numpy as np
 import pyztraj
 
 # Load structure
