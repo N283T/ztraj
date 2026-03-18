@@ -26,6 +26,9 @@ dependencies = ["numpy>=1.24", "cffi>=1.15"]
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=4.0", "ruff>=0.5", "ty>=0.0.1a0"]
 
+[project.scripts]
+ztraj = "pyztraj.cli:main"
+
 [project.urls]
 Repository = "https://github.com/N283T/ztraj"
 Issues = "https://github.com/N283T/ztraj/issues"
