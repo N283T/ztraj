@@ -11,7 +11,7 @@ const std = @import("std");
 ///   b3 = pos[l] - pos[k]
 ///   n1 = cross(b1, b2)
 ///   n2 = cross(b2, b3)
-///   m  = cross(n1, normalize(b2))
+///   m  = cross(normalize(b2), n1)
 ///   angle = atan2(dot(m, n2), dot(n1, n2))
 ///
 /// Uses f64 intermediate precision.
@@ -60,10 +60,10 @@ pub fn compute(
         const b2ny = b2y / b2_len;
         const b2nz = b2z / b2_len;
 
-        // m = cross(n1, b2_normalized)
-        const mx = n1y * b2nz - n1z * b2ny;
-        const my = n1z * b2nx - n1x * b2nz;
-        const mz = n1x * b2ny - n1y * b2nx;
+        // m = cross(b2_normalized, n1)  [IUPAC sign convention]
+        const mx = b2ny * n1z - b2nz * n1y;
+        const my = b2nz * n1x - b2nx * n1z;
+        const mz = b2nx * n1y - b2ny * n1x;
 
         const dot_m_n2 = mx * n2x + my * n2y + mz * n2z;
         const dot_n1_n2 = n1x * n2x + n1y * n2y + n1z * n2z;
@@ -89,8 +89,8 @@ test "dihedrals: planar cis (0 degrees)" {
     // n1=cross(b1,b2) = (-1*0-0*0, 0*1-0*0, 0*0-(-1)*1) = (0,0,1)
     // n2=cross(b2,b3) = (0*0-0*1, 0*0-1*0, 1*1-0*0) = (0,0,1)
     // angle = atan2(dot(m,n2), dot(n1,n2))
-    // b2_norm=(1,0,0), m=cross(n1,b2n)=cross((0,0,1),(1,0,0))=(0*0-1*0, 1*1-0*0, 0*0-0*1)=(0,1,0)
-    // dot(m,n2)=dot((0,1,0),(0,0,1))=0
+    // b2_norm=(1,0,0), m=cross(b2n,n1)=cross((1,0,0),(0,0,1))=(0*1-0*0, 0*0-1*1, 1*0-0*0)=(0,-1,0)
+    // dot(m,n2)=dot((0,-1,0),(0,0,1))=0
     // dot(n1,n2)=dot((0,0,1),(0,0,1))=1
     // angle=atan2(0,1)=0  -> cis = 0
     const x = [_]f32{ 0.0, 0.0, 1.0, 1.0 };
@@ -109,8 +109,8 @@ test "dihedrals: planar trans (pi radians)" {
     // b1=(0,-1,0), b2=(1,0,0), b3=(0,-1,0)
     // n1=cross(b1,b2)=(0,0,1) (same as before)
     // n2=cross(b2,b3)=cross((1,0,0),(0,-1,0))=(0*0-0*(-1), 0*0-1*0, 1*(-1)-0*0)=(0,0,-1)
-    // b2_norm=(1,0,0), m=cross(n1,b2n)=(0,1,0) (same as before)
-    // dot(m,n2)=dot((0,1,0),(0,0,-1))=0
+    // b2_norm=(1,0,0), m=cross(b2n,n1)=(0,-1,0) (same as before)
+    // dot(m,n2)=dot((0,-1,0),(0,0,-1))=0
     // dot(n1,n2)=dot((0,0,1),(0,0,-1))=-1
     // angle=atan2(0,-1)=pi
     const x = [_]f32{ 0.0, 0.0, 1.0, 1.0 };
@@ -133,10 +133,10 @@ test "dihedrals: 90 degree dihedral" {
     // b1=(0,-1,0), b2=(1,0,0), b3=(0,0,1)
     // n1=cross(b1,b2)=cross((0,-1,0),(1,0,0))=((-1)*0-0*0, 0*1-0*0, 0*0-(-1)*1)=(0,0,1)
     // n2=cross(b2,b3)=cross((1,0,0),(0,0,1))=(0*1-0*0, 0*0-1*1, 1*0-0*0)=(0,-1,0)
-    // b2_norm=(1,0,0), m=cross(n1,b2n)=cross((0,0,1),(1,0,0))=(0*0-1*0, 1*1-0*0, 0*0-0*1)=(0,1,0)
-    // dot(m,n2)=dot((0,1,0),(0,-1,0))=-1
+    // b2_norm=(1,0,0), m=cross(b2n,n1)=cross((1,0,0),(0,0,1))=(0,-1,0)  [IUPAC: cross(b2n,n1)]
+    // dot(m,n2)=dot((0,-1,0),(0,-1,0))=1
     // dot(n1,n2)=dot((0,0,1),(0,-1,0))=0
-    // angle=atan2(-1,0)=-pi/2
+    // angle=atan2(1,0)=pi/2
     const x = [_]f32{ 0.0, 0.0, 1.0, 1.0 };
     const y = [_]f32{ 1.0, 0.0, 0.0, 0.0 };
     const z = [_]f32{ 0.0, 0.0, 0.0, 1.0 };
