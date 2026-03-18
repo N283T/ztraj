@@ -77,6 +77,34 @@ _CDEF = """
     int ztraj_read_xtc_frame(void* handle, float* x, float* y, float* z,
                              float* time, int32_t* step);
     void ztraj_close_xtc(void* handle);
+
+    // Analysis: RDF
+    int ztraj_rdf(const float* sel1_x, const float* sel1_y, const float* sel1_z,
+                  size_t n_sel1,
+                  const float* sel2_x, const float* sel2_y, const float* sel2_z,
+                  size_t n_sel2,
+                  double box_volume, float r_min, float r_max, uint32_t n_bins,
+                  double* r_out, double* g_r_out);
+
+    // Analysis: Hydrogen Bonds
+    typedef struct { uint32_t donor; uint32_t hydrogen; uint32_t acceptor;
+                     float distance; float angle; } CHBond;
+    int ztraj_detect_hbonds(void* structure_handle,
+                            const float* x, const float* y, const float* z,
+                            size_t n_atoms, float dist_cutoff, float angle_cutoff,
+                            CHBond* hbonds_out, size_t capacity, size_t* n_found);
+
+    // Analysis: Contacts
+    #define ZTRAJ_SCHEME_CLOSEST 0
+    #define ZTRAJ_SCHEME_CA 1
+    #define ZTRAJ_SCHEME_CLOSEST_HEAVY 2
+    typedef struct { uint32_t residue_i; uint32_t residue_j;
+                     float distance; } CContact;
+    int ztraj_compute_contacts(void* structure_handle,
+                               const float* x, const float* y, const float* z,
+                               size_t n_atoms, int scheme, float cutoff,
+                               CContact* contacts_out, size_t capacity,
+                               size_t* n_found);
 """
 
 _ffi = cffi.FFI()

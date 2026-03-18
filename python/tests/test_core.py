@@ -213,3 +213,65 @@ class TestXtcReader:
         with pytest.raises(ValueError, match="atoms"):
             with pyztraj.open_xtc(xtc_path, 999) as _reader:
                 pass
+
+
+class TestRDF:
+    def test_uniform_distribution(self):
+        # Two selections at known positions — just verify shape and no crash
+        sel1 = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
+        sel2 = np.array([[2.0, 0.0, 0.0], [3.0, 0.0, 0.0]], dtype=np.float32)
+        r, g_r = pyztraj.compute_rdf(sel1, sel2, box_volume=1000.0, r_max=5.0, n_bins=50)
+        assert r.shape == (50,)
+        assert g_r.shape == (50,)
+        assert np.all(r >= 0)
+
+    def test_invalid_params(self):
+        sel = np.array([[0.0, 0.0, 0.0]], dtype=np.float32)
+        with pytest.raises(pyztraj.ZtrajError):
+            pyztraj.compute_rdf(sel, sel, box_volume=-1.0)
+
+
+class TestHBonds:
+    def test_detect_from_pdb(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        hbonds = pyztraj.detect_hbonds(struct, struct.coords)
+        assert isinstance(hbonds, list)
+        if len(hbonds) > 0:
+            hb = hbonds[0]
+            assert isinstance(hb, pyztraj.HBond)
+            assert hb.distance > 0
+            assert hb.angle > 0
+
+    def test_returns_expected_fields(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        hbonds = pyztraj.detect_hbonds(struct, struct.coords)
+        for hb in hbonds:
+            assert hb.donor >= 0
+            assert hb.hydrogen >= 0
+            assert hb.acceptor >= 0
+            assert hb.distance <= 2.5  # default cutoff
+            assert hb.angle >= 120.0  # default cutoff
+
+
+class TestContacts:
+    def test_detect_from_pdb(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        contacts = pyztraj.compute_contacts(struct, struct.coords, cutoff=8.0)
+        assert isinstance(contacts, list)
+        assert len(contacts) > 0  # 38 residue protein should have many contacts
+        c = contacts[0]
+        assert isinstance(c, pyztraj.Contact)
+        assert c.residue_i < c.residue_j
+        assert c.distance > 0
+        assert c.distance < 8.0
+
+    def test_schemes(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        for scheme in ["closest", "ca", "closest_heavy"]:
+            contacts = pyztraj.compute_contacts(struct, struct.coords, cutoff=8.0, scheme=scheme)
+            assert isinstance(contacts, list)
+
+    def test_invalid_scheme(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        with pytest.raises(ValueError, match="Unknown scheme"):
+            pyztraj.compute_contacts(struct, struct.coords, scheme="invalid")
