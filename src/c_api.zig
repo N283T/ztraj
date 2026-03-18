@@ -17,6 +17,9 @@ const inertia_mod = @import("geometry/inertia.zig");
 const rmsf_mod = @import("geometry/rmsf.zig");
 const pdb_mod = @import("io/pdb.zig");
 const xtc_mod = @import("io/xtc.zig");
+const hbonds_mod = @import("analysis/hbonds.zig");
+const contacts_mod = @import("analysis/contacts.zig");
+const rdf_mod = @import("analysis/rdf.zig");
 
 // =============================================================================
 // Error Codes
@@ -724,6 +727,213 @@ export fn ztraj_read_xtc_frame(
 export fn ztraj_close_xtc(handle: ?*anyopaque) callconv(.c) void {
     const h = castXtcHandle(handle) orelse return;
     h.deinit();
+}
+
+// =============================================================================
+// Analysis: RDF
+// =============================================================================
+
+/// Compute radial distribution function g(r) between two atom selections.
+///
+/// `sel1_x/y/z` are SOA coordinates for selection 1 (length `n_sel1`).
+/// `sel2_x/y/z` are SOA coordinates for selection 2 (length `n_sel2`).
+/// `box_volume` is the simulation box volume in cubic Angstroms.
+/// `r_out` and `g_r_out` must each have `n_bins` elements.
+export fn ztraj_rdf(
+    sel1_x: [*]const f32,
+    sel1_y: [*]const f32,
+    sel1_z: [*]const f32,
+    n_sel1: usize,
+    sel2_x: [*]const f32,
+    sel2_y: [*]const f32,
+    sel2_z: [*]const f32,
+    n_sel2: usize,
+    box_volume: f64,
+    r_min: f32,
+    r_max: f32,
+    n_bins: u32,
+    r_out: [*]f64,
+    g_r_out: [*]f64,
+) callconv(.c) c_int {
+    if (n_sel1 == 0 or n_sel2 == 0 or n_bins == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (r_max <= r_min) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (box_volume <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const config = rdf_mod.Config{
+        .r_min = r_min,
+        .r_max = r_max,
+        .n_bins = n_bins,
+    };
+
+    var rdf_result = rdf_mod.compute(
+        c_allocator,
+        sel1_x[0..n_sel1],
+        sel1_y[0..n_sel1],
+        sel1_z[0..n_sel1],
+        sel2_x[0..n_sel2],
+        sel2_y[0..n_sel2],
+        sel2_z[0..n_sel2],
+        box_volume,
+        config,
+    ) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer rdf_result.deinit();
+
+    @memcpy(r_out[0..n_bins], rdf_result.r);
+    @memcpy(g_r_out[0..n_bins], rdf_result.g_r);
+
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Analysis: Hydrogen Bonds
+// =============================================================================
+
+/// C-compatible hydrogen bond record.
+const CHBond = extern struct {
+    donor: u32,
+    hydrogen: u32,
+    acceptor: u32,
+    distance: f32,
+    angle: f32,
+};
+
+/// Detect hydrogen bonds using Baker-Hubbard criteria.
+///
+/// Uses topology from `structure_handle` (must be a valid StructureHandle) to
+/// find D-H bonds, and `x/y/z` for the current frame coordinates.
+/// Results are written to `hbonds_out` (max `capacity` elements).
+/// `n_found` receives the actual number of hydrogen bonds detected.
+/// If `n_found > capacity`, only the first `capacity` are written.
+export fn ztraj_detect_hbonds(
+    structure_handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    dist_cutoff: f32,
+    angle_cutoff: f32,
+    hbonds_out: [*]CHBond,
+    capacity: usize,
+    n_found: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    // Build a temporary Frame from the provided coordinates
+    // SAFETY: hbonds.detect only reads coordinates
+    const frame = types.Frame{
+        .x = @constCast(x[0..n_atoms]),
+        .y = @constCast(y[0..n_atoms]),
+        .z = @constCast(z[0..n_atoms]),
+        .box_vectors = null,
+        .time = 0.0,
+        .step = 0,
+        .allocator = c_allocator,
+    };
+
+    const config = hbonds_mod.Config{
+        .dist_cutoff = dist_cutoff,
+        .angle_cutoff = angle_cutoff,
+    };
+
+    const hbonds = hbonds_mod.detect(c_allocator, h.parse_result.topology, frame, config) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer c_allocator.free(hbonds);
+
+    n_found.* = hbonds.len;
+
+    const n_copy = @min(hbonds.len, capacity);
+    for (0..n_copy) |i| {
+        hbonds_out[i] = .{
+            .donor = hbonds[i].donor,
+            .hydrogen = hbonds[i].hydrogen,
+            .acceptor = hbonds[i].acceptor,
+            .distance = hbonds[i].distance,
+            .angle = hbonds[i].angle,
+        };
+    }
+
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Analysis: Residue-Residue Contacts
+// =============================================================================
+
+/// C-compatible contact record.
+const CContact = extern struct {
+    residue_i: u32,
+    residue_j: u32,
+    distance: f32,
+};
+
+/// Contact distance scheme constants.
+pub const ZTRAJ_SCHEME_CLOSEST: c_int = 0;
+pub const ZTRAJ_SCHEME_CA: c_int = 1;
+pub const ZTRAJ_SCHEME_CLOSEST_HEAVY: c_int = 2;
+
+/// Compute residue-residue contacts.
+///
+/// Uses topology from `structure_handle` and `x/y/z` for coordinates.
+/// `scheme`: 0=closest, 1=ca, 2=closest_heavy.
+/// Results written to `contacts_out` (max `capacity` elements).
+/// `n_found` receives the actual number of contacts detected.
+export fn ztraj_compute_contacts(
+    structure_handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    scheme: c_int,
+    cutoff: f32,
+    contacts_out: [*]CContact,
+    capacity: usize,
+    n_found: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (cutoff <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const zig_scheme: contacts_mod.Scheme = switch (scheme) {
+        ZTRAJ_SCHEME_CLOSEST => .closest,
+        ZTRAJ_SCHEME_CA => .ca,
+        ZTRAJ_SCHEME_CLOSEST_HEAVY => .closest_heavy,
+        else => return ZTRAJ_ERROR_INVALID_INPUT,
+    };
+
+    // SAFETY: contacts.compute only reads coordinates
+    const frame = types.Frame{
+        .x = @constCast(x[0..n_atoms]),
+        .y = @constCast(y[0..n_atoms]),
+        .z = @constCast(z[0..n_atoms]),
+        .box_vectors = null,
+        .time = 0.0,
+        .step = 0,
+        .allocator = c_allocator,
+    };
+
+    const contacts = contacts_mod.compute(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer c_allocator.free(contacts);
+
+    n_found.* = contacts.len;
+
+    const n_copy = @min(contacts.len, capacity);
+    for (0..n_copy) |i| {
+        contacts_out[i] = .{
+            .residue_i = contacts[i].residue_i,
+            .residue_j = contacts[i].residue_j,
+            .distance = contacts[i].distance,
+        };
+    }
+
+    return ZTRAJ_OK;
 }
 
 // =============================================================================
