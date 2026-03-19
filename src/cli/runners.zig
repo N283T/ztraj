@@ -876,6 +876,14 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
+    // The all command only supports JSON output (multi-metric data
+    // doesn't map to flat CSV/TSV)
+    if (args.format != .json) {
+        const stderr = std.fs.File.stderr();
+        try stderr.writeAll("error: 'all' command only supports JSON output (--format json)\n");
+        return error.UnsupportedFormat;
+    }
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();

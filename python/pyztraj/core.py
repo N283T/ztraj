@@ -1044,6 +1044,9 @@ def analyze_all(
     if len(frames) == 0:
         msg = "frames list must not be empty"
         raise ValueError(msg)
+    if ref_frame < 0 or ref_frame >= len(frames):
+        msg = f"ref_frame {ref_frame} out of range for {len(frames)} frames"
+        raise ValueError(msg)
 
     n_frames = len(frames)
     ref_coords = frames[ref_frame]
