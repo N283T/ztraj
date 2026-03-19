@@ -5,8 +5,10 @@ from pyztraj._helpers import ZtrajError
 from pyztraj.analysis import (
     Contact,
     HBond,
+    PcaResult,
     SasaResult,
     compute_contacts,
+    compute_pca,
     compute_rdf,
     compute_sasa,
     detect_hbonds,
@@ -38,6 +40,7 @@ def get_version() -> str:
 __all__ = [
     "Contact",
     "HBond",
+    "PcaResult",
     "SasaResult",
     "Structure",
     "XtcReader",
@@ -48,6 +51,7 @@ __all__ = [
     "compute_center_of_mass",
     "compute_contacts",
     "compute_dihedrals",
+    "compute_pca",
     "compute_distances",
     "compute_inertia",
     "compute_principal_moments",

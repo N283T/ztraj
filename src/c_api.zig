@@ -22,6 +22,7 @@ const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
 const sasa_mod = @import("analysis/sasa.zig");
 const pbc_mod = @import("geometry/pbc.zig");
+const pca_mod = @import("analysis/pca.zig");
 
 // =============================================================================
 // Error Codes
@@ -1000,6 +1001,59 @@ export fn ztraj_compute_sasa(
 // =============================================================================
 
 /// Parse box from flat 9-element f32 array to [3][3]f32.
+/// Compute PCA covariance matrix of coordinate fluctuations.
+/// `all_x/y/z` are flat contiguous: `all_x[frame * n_atoms + atom]`.
+/// `cov_out` must have `(n_selected * 3)^2` elements (row-major).
+/// `n_selected` is `n_indices` if atom_indices is provided, else `n_atoms`.
+export fn ztraj_pca_covariance(
+    all_x: [*]const f32,
+    all_y: [*]const f32,
+    all_z: [*]const f32,
+    n_frames: usize,
+    n_atoms: usize,
+    atom_indices: ?[*]const u32,
+    n_indices: usize,
+    cov_out: [*]f64,
+) callconv(.c) c_int {
+    if (n_frames < 2 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const indices: ?[]const u32 = if (atom_indices) |ptr|
+        (if (n_indices > 0) ptr[0..n_indices] else null)
+    else
+        null;
+
+    // SAFETY: pca only reads frame coordinates
+    const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    defer c_allocator.free(frames);
+
+    for (0..n_frames) |f| {
+        const offset = f * n_atoms;
+        frames[f] = .{
+            .x = @constCast(all_x[offset .. offset + n_atoms]),
+            .y = @constCast(all_y[offset .. offset + n_atoms]),
+            .z = @constCast(all_z[offset .. offset + n_atoms]),
+            .box_vectors = null,
+            .time = 0.0,
+            .step = 0,
+            .allocator = c_allocator,
+        };
+    }
+
+    const cov = pca_mod.computeCovarianceMatrix(c_allocator, frames, indices) catch |err| {
+        return switch (err) {
+            error.TooFewFrames => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
+    };
+    defer c_allocator.free(cov);
+
+    const n_sel = if (indices) |idx| idx.len else n_atoms;
+    const dim = n_sel * 3;
+    @memcpy(cov_out[0 .. dim * dim], cov);
+
+    return ZTRAJ_OK;
+}
+
 fn parseBox(box_ptr: [*]const f32) [3][3]f32 {
     var b: [3][3]f32 = undefined;
     for (0..3) |i| {

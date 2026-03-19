@@ -29,6 +29,7 @@ pub const analysis = struct {
     pub const contacts = @import("analysis/contacts.zig");
     pub const rdf = @import("analysis/rdf.zig");
     pub const sasa = @import("analysis/sasa.zig");
+    pub const pca = @import("analysis/pca.zig");
 };
 
 pub const io = struct {

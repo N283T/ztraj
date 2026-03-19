@@ -338,3 +338,108 @@ def compute_sasa(
         return SasaResult(total_area=float(total_area[0]), atom_areas=atom_areas)
     finally:
         lib.ztraj_free_structure(handle)
+
+
+@dataclass
+class PcaResult:
+    """PCA result with eigenvalues, eigenvectors, and variance ratios."""
+
+    eigenvalues: NDArray[np.float64]  # (n_components,) descending
+    eigenvectors: NDArray[np.float64]  # (3N, n_components) column vectors
+    variance_ratio: NDArray[np.float64]  # fraction of variance per component
+    covariance: NDArray[np.float64]  # (3N, 3N) covariance matrix
+
+
+def compute_pca(
+    frames: list[NDArray[np.float32]],
+    atom_indices: NDArray[np.uint32] | None = None,
+    n_components: int | None = None,
+) -> PcaResult:
+    """Principal Component Analysis of coordinate fluctuations.
+
+    Computes the covariance matrix in Zig (fast), then eigendecomposes
+    with NumPy (LAPACK). Returns eigenvalues, eigenvectors, and variance ratios.
+
+    Args:
+        frames: List of (n_atoms, 3) coordinate arrays.
+        atom_indices: Optional subset of atom indices (e.g., CA atoms).
+        n_components: Number of top components to return. Default: all.
+
+    Returns:
+        PcaResult with eigenvalues (descending), eigenvectors, variance_ratio.
+    """
+    if len(frames) < 2:
+        msg = "PCA requires at least 2 frames"
+        raise ValueError(msg)
+
+    ffi = get_ffi()
+    lib = get_lib()
+    n_frames = len(frames)
+    n_atoms = frames[0].shape[0]
+
+    # Build flat coordinate arrays
+    all_x = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_y = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_z = np.empty(n_frames * n_atoms, dtype=np.float32)
+
+    for i, frame in enumerate(frames):
+        frame = np.ascontiguousarray(frame, dtype=np.float32)
+        offset = i * n_atoms
+        all_x[offset : offset + n_atoms] = frame[:, 0]
+        all_y[offset : offset + n_atoms] = frame[:, 1]
+        all_z[offset : offset + n_atoms] = frame[:, 2]
+
+    if atom_indices is not None:
+        atom_indices = _as_u32(atom_indices)
+        idx_ptr = _ptr_u32(atom_indices)
+        n_indices = len(atom_indices)
+        n_sel = n_indices
+    else:
+        idx_ptr = ffi.cast("uint32_t*", 0)
+        n_indices = 0
+        n_sel = n_atoms
+
+    dim = n_sel * 3
+    cov_flat = np.empty(dim * dim, dtype=np.float64)
+
+    _check(
+        lib.ztraj_pca_covariance(
+            _ptr_f32(all_x),
+            _ptr_f32(all_y),
+            _ptr_f32(all_z),
+            n_frames,
+            n_atoms,
+            idx_ptr,
+            n_indices,
+            _ptr_f64(cov_flat),
+        ),
+        "compute_pca",
+    )
+
+    cov = cov_flat.reshape(dim, dim)
+
+    # Eigendecompose (symmetric → use eigh)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    # Sort descending
+    idx_sorted = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[idx_sorted]
+    eigenvectors = eigenvectors[:, idx_sorted]
+
+    # Variance ratio
+    total_var = np.sum(np.maximum(eigenvalues, 0))
+    variance_ratio = np.maximum(eigenvalues, 0) / total_var if total_var > 0 else eigenvalues * 0
+
+    # Truncate to n_components
+    if n_components is not None:
+        n_components = min(n_components, dim)
+        eigenvalues = eigenvalues[:n_components]
+        eigenvectors = eigenvectors[:, :n_components]
+        variance_ratio = variance_ratio[:n_components]
+
+    return PcaResult(
+        eigenvalues=eigenvalues,
+        eigenvectors=eigenvectors,
+        variance_ratio=variance_ratio,
+        covariance=cov,
+    )
