@@ -52,6 +52,7 @@ pub fn superpose(
         const out_y = try allocator.alloc(f32, n_all);
         errdefer allocator.free(out_y);
         const out_z = try allocator.alloc(f32, n_all);
+        errdefer allocator.free(out_z);
         @memcpy(out_x, mob_x);
         @memcpy(out_y, mob_y);
         @memcpy(out_z, mob_z);
@@ -107,6 +108,7 @@ pub fn superpose(
     var g_ref: f64 = 0.0;
     var g_mob: f64 = 0.0;
 
+    // S = Ref^T * Mobile (same convention as rmsd.zig)
     if (atom_indices) |indices| {
         for (indices) |idx| {
             const rx = @as(f64, ref_x[idx]) - ref_cx;
@@ -117,15 +119,15 @@ pub fn superpose(
             const mz = @as(f64, mob_z[idx]) - mob_cz;
             g_ref += rx * rx + ry * ry + rz * rz;
             g_mob += mx * mx + my * my + mz * mz;
-            sxx += mx * rx;
-            sxy += mx * ry;
-            sxz += mx * rz;
-            syx += my * rx;
-            syy += my * ry;
-            syz += my * rz;
-            szx += mz * rx;
-            szy += mz * ry;
-            szz += mz * rz;
+            sxx += rx * mx;
+            sxy += rx * my;
+            sxz += rx * mz;
+            syx += ry * mx;
+            syy += ry * my;
+            syz += ry * mz;
+            szx += rz * mx;
+            szy += rz * my;
+            szz += rz * mz;
         }
     } else {
         for (0..n_all) |idx| {
@@ -137,15 +139,15 @@ pub fn superpose(
             const mz = @as(f64, mob_z[idx]) - mob_cz;
             g_ref += rx * rx + ry * ry + rz * rz;
             g_mob += mx * mx + my * my + mz * mz;
-            sxx += mx * rx;
-            sxy += mx * ry;
-            sxz += mx * rz;
-            syx += my * rx;
-            syy += my * ry;
-            syz += my * rz;
-            szx += mz * rx;
-            szy += mz * ry;
-            szz += mz * rz;
+            sxx += rx * mx;
+            sxy += rx * my;
+            sxz += rx * mz;
+            syx += ry * mx;
+            syy += ry * my;
+            syz += ry * mz;
+            szx += rz * mx;
+            szy += rz * my;
+            szz += rz * mz;
         }
     }
 
@@ -235,6 +237,7 @@ pub fn superpose(
     const out_y = try allocator.alloc(f32, n_all);
     errdefer allocator.free(out_y);
     const out_z = try allocator.alloc(f32, n_all);
+    errdefer allocator.free(out_z);
 
     for (0..n_all) |i| {
         const cx = @as(f64, mob_x[i]) - mob_cx;
@@ -318,4 +321,26 @@ test "superpose: with atom_indices — fit subset, transform all" {
     }
     // 4th atom should also be transformed (not same as ref)
     try std.testing.expect(result.x.len == 4);
+}
+
+test "superpose: 90-degree rotation around z-axis" {
+    const allocator = std.testing.allocator;
+    // Reference: centered triangle in xy-plane
+    const ref_x = [_]f32{ 1.0, -1.0, 0.0 };
+    const ref_y = [_]f32{ 0.0, 0.0, 1.0 };
+    const ref_z = [_]f32{ 0.0, 0.0, 0.0 };
+    // Mobile: same triangle rotated 90° around z (x→y, y→-x)
+    const mob_x = [_]f32{ 0.0, 0.0, -1.0 };
+    const mob_y = [_]f32{ 1.0, -1.0, 0.0 };
+    const mob_z = [_]f32{ 0.0, 0.0, 0.0 };
+
+    var result = try superpose(allocator, &ref_x, &ref_y, &ref_z, &mob_x, &mob_y, &mob_z, null);
+    defer result.deinit();
+
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), result.rmsd, 1e-5);
+    for (0..3) |i| {
+        try std.testing.expectApproxEqAbs(ref_x[i], result.x[i], 1e-3);
+        try std.testing.expectApproxEqAbs(ref_y[i], result.y[i], 1e-3);
+        try std.testing.expectApproxEqAbs(ref_z[i], result.z[i], 1e-3);
+    }
 }
