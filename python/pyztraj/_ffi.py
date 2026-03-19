@@ -105,6 +105,12 @@ _CDEF = """
                                size_t n_atoms, int scheme, float cutoff,
                                CContact* contacts_out, size_t capacity,
                                size_t* n_found);
+
+    // Analysis: SASA
+    int ztraj_compute_sasa(void* structure_handle,
+                           const float* x, const float* y, const float* z,
+                           size_t n_atoms, uint32_t n_points, double probe_radius,
+                           size_t n_threads, double* atom_areas, double* total_area);
 """
 
 _ffi = cffi.FFI()

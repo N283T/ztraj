@@ -12,12 +12,19 @@ pub fn build(b: *std.Build) void {
     });
     const zxdrfile_mod = zxdrfile_dep.module("zxdrfile");
 
+    const zsasa_dep = b.dependency("zsasa", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const zsasa_mod = zsasa_dep.module("zsasa");
+
     // Library module (exposed to package consumers via zig fetch)
     const mod = b.addModule("ztraj", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "zxdrfile", .module = zxdrfile_mod },
+            .{ .name = "zsasa", .module = zsasa_mod },
         },
     });
 
@@ -31,6 +38,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zxdrfile", .module = zxdrfile_mod },
+                .{ .name = "zsasa", .module = zsasa_mod },
             },
         }),
     });
