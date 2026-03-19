@@ -505,12 +505,14 @@ def make_molecules_whole(
     Returns:
         (n_atoms, 3) unwrapped coordinates (new array).
     """
-    from pyztraj._helpers import _check
-
     ffi = get_ffi()
     lib = get_lib()
     x, y, z = _to_soa(coords)
     n_atoms = len(x)
+
+    if box.shape != (3, 3):
+        msg = f"box must be (3, 3), got {box.shape}"
+        raise ValueError(msg)
     box_flat = np.ascontiguousarray(box.reshape(9), dtype=np.float32)
 
     path_bytes = str(structure._pdb_path).encode("utf-8")
