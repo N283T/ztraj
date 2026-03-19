@@ -459,16 +459,26 @@ pub fn calculateAccessibilitiesOptimized(residues: []Residue, allocator: Allocat
 
         for (backbone_atoms) |ba| {
             const n_neighbours = collectNeighboursNoAlloc(
-                ba.pos, ba.radius, residues, res, residue_neighbors[i],
-                residue_aabbs, &neighbour_buffer,
+                ba.pos,
+                ba.radius,
+                residues,
+                res,
+                residue_neighbors[i],
+                residue_aabbs,
+                &neighbour_buffer,
             );
             total += calculateAtomSurfaceSimd(ba.radius, neighbour_buffer[0..n_neighbours]);
         }
 
         for (res.side_chain) |sc| {
             const n_neighbours = collectNeighboursNoAlloc(
-                sc.pos, types.kRadiusSideAtom, residues, res, residue_neighbors[i],
-                residue_aabbs, &neighbour_buffer,
+                sc.pos,
+                types.kRadiusSideAtom,
+                residues,
+                res,
+                residue_neighbors[i],
+                residue_aabbs,
+                &neighbour_buffer,
             );
             total += calculateAtomSurfaceSimd(types.kRadiusSideAtom, neighbour_buffer[0..n_neighbours]);
         }
@@ -519,8 +529,13 @@ fn parallelWorker(ctx: ParallelContext, start: usize, end: usize) void {
 
         for (backbone_atoms) |ba| {
             const n_neighbours = collectNeighboursNoAlloc(
-                ba.pos, ba.radius, ctx.residues, res, ctx.residue_neighbors[i],
-                ctx.residue_aabbs, &neighbour_buffer,
+                ba.pos,
+                ba.radius,
+                ctx.residues,
+                res,
+                ctx.residue_neighbors[i],
+                ctx.residue_aabbs,
+                &neighbour_buffer,
             );
             total += calculateAtomSurfaceSimd(ba.radius, neighbour_buffer[0..n_neighbours]);
         }
@@ -528,8 +543,13 @@ fn parallelWorker(ctx: ParallelContext, start: usize, end: usize) void {
         // Process side chain atoms
         for (res.side_chain) |sc| {
             const n_neighbours = collectNeighboursNoAlloc(
-                sc.pos, types.kRadiusSideAtom, ctx.residues, res, ctx.residue_neighbors[i],
-                ctx.residue_aabbs, &neighbour_buffer,
+                sc.pos,
+                types.kRadiusSideAtom,
+                ctx.residues,
+                res,
+                ctx.residue_neighbors[i],
+                ctx.residue_aabbs,
+                &neighbour_buffer,
             );
             total += calculateAtomSurfaceSimd(types.kRadiusSideAtom, neighbour_buffer[0..n_neighbours]);
         }
@@ -689,7 +709,12 @@ pub fn calculateAccessibilitiesParallel(residues: []Residue, allocator: Allocato
     }.call;
 
     var pool = try thread_pool_mod.ThreadPool(ParallelContext, Unit).init(
-        allocator, n_threads, work_fn, ctx, n, chunk_size,
+        allocator,
+        n_threads,
+        work_fn,
+        ctx,
+        n,
+        chunk_size,
     );
     defer pool.deinit();
     try pool.run();

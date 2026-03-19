@@ -85,7 +85,7 @@ test "isGzipCompressed" {
 
     // Not gzip
     try testing.expect(!isGzipCompressed(&[_]u8{ 0x00, 0x00, 0x00, 0x00 }));
-    try testing.expect(!isGzipCompressed(&[_]u8{ 0x1f })); // Too short
+    try testing.expect(!isGzipCompressed(&[_]u8{0x1f})); // Too short
     try testing.expect(!isGzipCompressed(&[_]u8{})); // Empty
 }
 

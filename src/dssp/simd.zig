@@ -176,7 +176,9 @@ pub fn hbondReciprocalDistances(
 
 test "distanceSquaredBatch4 - basic" {
     const result = distanceSquaredBatch4(
-        0.0, 0.0, 0.0,
+        0.0,
+        0.0,
+        0.0,
         .{ 1.0, 2.0, 3.0, 0.0 },
         .{ 0.0, 0.0, 0.0, 4.0 },
         .{ 0.0, 0.0, 0.0, 0.0 },
@@ -190,7 +192,9 @@ test "distanceSquaredBatch4 - basic" {
 
 test "isPointBuriedBatch4 - point inside one atom" {
     const buried = isPointBuriedBatch4(
-        0.5, 0.0, 0.0,
+        0.5,
+        0.0,
+        0.0,
         .{ 0.0, 10.0, 10.0, 10.0 },
         .{ 0.0, 10.0, 10.0, 10.0 },
         .{ 0.0, 10.0, 10.0, 10.0 },
@@ -201,7 +205,9 @@ test "isPointBuriedBatch4 - point inside one atom" {
 
 test "isPointBuriedBatch4 - point outside all atoms" {
     const buried = isPointBuriedBatch4(
-        5.0, 5.0, 5.0,
+        5.0,
+        5.0,
+        5.0,
         .{ 0.0, 10.0, 0.0, 10.0 },
         .{ 0.0, 0.0, 10.0, 10.0 },
         .{ 0.0, 0.0, 0.0, 0.0 },
@@ -212,7 +218,9 @@ test "isPointBuriedBatch4 - point outside all atoms" {
 
 test "isPointBuriedBatch8 - point inside one atom" {
     const buried = isPointBuriedBatch8(
-        0.5, 0.0, 0.0,
+        0.5,
+        0.0,
+        0.0,
         .{ 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0 },
         .{ 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0 },
         .{ 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0 },
@@ -224,10 +232,18 @@ test "isPointBuriedBatch8 - point inside one atom" {
 test "hbondReciprocalDistances - basic" {
     // H at (2, 0.5, 0), N at (3, 0, 0), O at (0, 1.2, 0), C at (0, 0, 0)
     const result = hbondReciprocalDistances(
-        2.0, 0.5, 0.0,  // H
-        3.0, 0.0, 0.0,  // N
-        0.0, 1.2, 0.0,  // O
-        0.0, 0.0, 0.0,  // C
+        2.0,
+        0.5,
+        0.0, // H
+        3.0,
+        0.0,
+        0.0, // N
+        0.0,
+        1.2,
+        0.0, // O
+        0.0,
+        0.0,
+        0.0, // C
     );
 
     try std.testing.expect(result != null);
@@ -241,10 +257,18 @@ test "hbondReciprocalDistances - basic" {
 test "hbondReciprocalDistances - too close returns null" {
     // H and O at nearly the same position
     const result = hbondReciprocalDistances(
-        0.0, 0.0, 0.0,  // H
-        3.0, 0.0, 0.0,  // N
-        0.1, 0.0, 0.0,  // O (very close to H)
-        0.0, 0.0, 5.0,  // C
+        0.0,
+        0.0,
+        0.0, // H
+        3.0,
+        0.0,
+        0.0, // N
+        0.1,
+        0.0,
+        0.0, // O (very close to H)
+        0.0,
+        0.0,
+        5.0, // C
     );
 
     try std.testing.expectEqual(@as(?[4]f64, null), result);

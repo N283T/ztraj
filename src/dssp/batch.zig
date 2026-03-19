@@ -656,7 +656,12 @@ pub fn runBatchParallel(
     // Create thread pool (chunk_size=1: one file per work unit)
     const actual_threads = @min(n_threads, files.len);
     var pool = try thread_pool_mod.ThreadPool(BatchWorkerContext, FileResult).init(
-        allocator, actual_threads, batchWorker, ctx, files.len, 1,
+        allocator,
+        actual_threads,
+        batchWorker,
+        ctx,
+        files.len,
+        1,
     );
     defer pool.deinit();
 
@@ -816,7 +821,12 @@ fn runBatchAuto(
 
         const actual_threads = @min(n_threads, regular_files.len);
         var pool = try thread_pool_mod.ThreadPool(BatchWorkerContext, FileResult).init(
-            allocator, actual_threads, batchWorker, ctx, regular_files.len, 1,
+            allocator,
+            actual_threads,
+            batchWorker,
+            ctx,
+            regular_files.len,
+            1,
         );
         defer pool.deinit();
 

@@ -529,7 +529,7 @@ test "Bridge.lessThan - equal iBegin uses jBegin as tiebreaker" {
     // Same iBegin (72) and same size (1), so use jBegin as tiebreaker
     // b.jBegin (91) < a.jBegin (94), so b comes before a
     try std.testing.expect(!Bridge.lessThan({}, a, b)); // a is NOT less than b
-    try std.testing.expect(Bridge.lessThan({}, b, a));  // b IS less than a
+    try std.testing.expect(Bridge.lessThan({}, b, a)); // b IS less than a
 }
 
 test "Bridge.lessThan - equal iBegin uses size as first tiebreaker" {
@@ -550,7 +550,7 @@ test "Bridge.lessThan - equal iBegin uses size as first tiebreaker" {
 
     // Same iBegin (72), but a has larger size (2 > 1)
     // Larger bridges come first, so a < b
-    try std.testing.expect(Bridge.lessThan({}, a, b));  // a IS less than b (larger first)
+    try std.testing.expect(Bridge.lessThan({}, a, b)); // a IS less than b (larger first)
     try std.testing.expect(!Bridge.lessThan({}, b, a)); // b is NOT less than a
 }
 
@@ -595,5 +595,5 @@ test "Bridge.lessThan - chain_id takes precedence over all other keys" {
 
     // Chain 'A' < 'B', so b comes before a regardless of other keys
     try std.testing.expect(!Bridge.lessThan({}, a, b)); // a is NOT less than b
-    try std.testing.expect(Bridge.lessThan({}, b, a));  // b IS less than a
+    try std.testing.expect(Bridge.lessThan({}, b, a)); // b IS less than a
 }
