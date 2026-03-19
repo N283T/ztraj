@@ -277,6 +277,63 @@ class TestContacts:
             pyztraj.compute_contacts(struct, struct.coords, scheme="invalid")
 
 
+class TestAnalyzeAll:
+    def test_single_frame(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        result = pyztraj.analyze_all(struct, [struct.coords])
+        assert result["n_frames"] == 1
+        assert result["n_atoms"] == struct.n_atoms
+        assert result["rmsd"].shape == (1,)
+        assert result["rmsd"][0] == pytest.approx(0.0, abs=1e-6)  # self vs self
+        assert result["rg"].shape == (1,)
+        assert result["rg"][0] > 0
+        assert result["sasa"].shape == (1,)
+        assert result["sasa"][0] > 0
+        assert result["center_of_mass"].shape == (1, 3)
+        assert result["rmsf"].shape == (struct.n_atoms,)
+        assert result["n_hbonds"].shape == (1,)
+        assert result["n_contacts"].shape == (1,)
+        expected_keys = {
+            "n_frames",
+            "n_atoms",
+            "rmsd",
+            "rmsf",
+            "rg",
+            "sasa",
+            "center_of_mass",
+            "n_hbonds",
+            "n_contacts",
+        }
+        assert set(result.keys()) == expected_keys
+
+    def test_multi_frame(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        # Shift coords slightly to create a second distinct frame
+        shifted = struct.coords + np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        result = pyztraj.analyze_all(struct, [struct.coords, shifted])
+        assert result["n_frames"] == 2
+        assert result["rmsd"][0] == pytest.approx(0.0, abs=1e-6)
+        assert result["rmsd"][1] > 0  # shifted frame has nonzero RMSD
+
+    def test_ref_frame(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        shifted = struct.coords + np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        result = pyztraj.analyze_all(struct, [struct.coords, shifted], ref_frame=1)
+        # When ref is frame 1 (shifted), frame 1 has RMSD 0
+        assert result["rmsd"][1] == pytest.approx(0.0, abs=1e-6)
+        assert result["rmsd"][0] > 0
+
+    def test_empty_frames_raises(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        with pytest.raises(ValueError, match="empty"):
+            pyztraj.analyze_all(struct, [])
+
+    def test_invalid_ref_frame_raises(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        with pytest.raises(ValueError, match="ref_frame"):
+            pyztraj.analyze_all(struct, [struct.coords], ref_frame=5)
+
+
 class TestSASA:
     def test_compute_from_pdb(self, pdb_path: Path):
         struct = pyztraj.load_pdb(pdb_path)
