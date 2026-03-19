@@ -1,0 +1,71 @@
+"""Shared helpers for pyztraj modules.
+
+All coordinates are in Angstroms. Angles are in radians.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from pyztraj._ffi import get_ffi
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+
+class ZtrajError(Exception):
+    """Error raised by ztraj C library."""
+
+
+_ERROR_MESSAGES = {
+    -1: "Invalid input parameters",
+    -2: "Out of memory",
+    -3: "File I/O error",
+    -4: "Parse error",
+    -5: "End of file",
+}
+
+
+def _check(rc: int, operation: str = "") -> None:
+    """Check return code from C API and raise on error."""
+    if rc != 0:
+        msg = _ERROR_MESSAGES.get(rc, f"Unknown error (code {rc})")
+        if operation:
+            msg = f"{operation}: {msg}"
+        raise ZtrajError(msg)
+
+
+def _to_soa(coords: NDArray[np.float32]) -> tuple[NDArray, NDArray, NDArray]:
+    """Convert (n_atoms, 3) AOS coords to SOA (x, y, z) arrays."""
+    coords = np.ascontiguousarray(coords, dtype=np.float32)
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        msg = f"coords must be (n_atoms, 3), got {coords.shape}"
+        raise ValueError(msg)
+    return coords[:, 0].copy(), coords[:, 1].copy(), coords[:, 2].copy()
+
+
+def _as_u32(arr: NDArray) -> NDArray[np.uint32]:
+    """Ensure array is contiguous uint32."""
+    return np.ascontiguousarray(arr, dtype=np.uint32)
+
+
+def _ptr_f32(arr: NDArray[np.float32]):
+    """Get CFFI pointer to float32 array data."""
+    return get_ffi().cast("float*", arr.ctypes.data)
+
+
+def _ptr_f64(arr: NDArray[np.float64]):
+    """Get CFFI pointer to float64 array data."""
+    return get_ffi().cast("double*", arr.ctypes.data)
+
+
+def _ptr_u32(arr: NDArray[np.uint32]):
+    """Get CFFI pointer to uint32 array data."""
+    return get_ffi().cast("uint32_t*", arr.ctypes.data)
+
+
+def _ptr_i32(arr: NDArray[np.int32]):
+    """Get CFFI pointer to int32 array data."""
+    return get_ffi().cast("int32_t*", arr.ctypes.data)
