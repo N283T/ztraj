@@ -21,6 +21,7 @@ const hbonds_mod = @import("analysis/hbonds.zig");
 const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
 const sasa_mod = @import("analysis/sasa.zig");
+const native_contacts_mod = @import("analysis/native_contacts.zig");
 const pbc_mod = @import("geometry/pbc.zig");
 
 // =============================================================================
@@ -1000,6 +1001,41 @@ export fn ztraj_compute_sasa(
 // =============================================================================
 
 /// Parse box from flat 9-element f32 array to [3][3]f32.
+/// Compute native contacts Q value (hard-cut).
+export fn ztraj_native_contacts_q(
+    ref_x: [*]const f32,
+    ref_y: [*]const f32,
+    ref_z: [*]const f32,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    indices_a: [*]const u32,
+    n_a: usize,
+    indices_b: [*]const u32,
+    n_b: usize,
+    cutoff: f32,
+    result: *f64,
+) callconv(.c) c_int {
+    if (n_atoms == 0 or n_a == 0 or n_b == 0) {
+        result.* = 0.0;
+        return ZTRAJ_OK;
+    }
+
+    result.* = native_contacts_mod.computeQ(
+        ref_x[0..n_atoms],
+        ref_y[0..n_atoms],
+        ref_z[0..n_atoms],
+        x[0..n_atoms],
+        y[0..n_atoms],
+        z[0..n_atoms],
+        indices_a[0..n_a],
+        indices_b[0..n_b],
+        cutoff,
+    );
+    return ZTRAJ_OK;
+}
+
 fn parseBox(box_ptr: [*]const f32) [3][3]f32 {
     var b: [3][3]f32 = undefined;
     for (0..3) |i| {
