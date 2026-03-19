@@ -9,7 +9,7 @@
             .hash = "zxdrfile-0.1.1-JIaQ9ir5AACu7dbzJDk9taGRu7tRROckg6kClL58b9dP",
         },
         .zsasa = .{
-            .url = "git+https://github.com/N283T/freesasa-zig.git?ref=v0.2.4",
+            .url = "git+https://github.com/N283T/freesasa-zig.git#f76cafbf4f774531f291f8778552ba513bb03e5d",
             .hash = "zsasa-0.2.4-d7uHxM_KDABCLaSpqZFoO6LCEY_z8oJQD6i_v5eAKGuK",
         },
     },
