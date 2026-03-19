@@ -23,6 +23,9 @@ from pyztraj.geometry import (
     compute_rg,
     compute_rmsd,
     compute_rmsf,
+    make_molecules_whole,
+    minimum_image_distance,
+    wrap_coords,
 )
 from pyztraj.io import Structure, XtcReader, load_pdb, open_xtc
 
@@ -54,6 +57,9 @@ __all__ = [
     "compute_rmsf",
     "compute_sasa",
     "detect_hbonds",
+    "make_molecules_whole",
+    "minimum_image_distance",
+    "wrap_coords",
     "get_version",
     "load_pdb",
     "open_xtc",

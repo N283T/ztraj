@@ -416,3 +416,121 @@ def compute_rmsf(
         "compute_rmsf",
     )
     return result
+
+
+# =============================================================================
+# PBC functions
+# =============================================================================
+
+
+def wrap_coords(
+    coords: NDArray[np.float32],
+    box: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    """Wrap coordinates into the primary simulation box.
+
+    Args:
+        coords: (n_atoms, 3) coordinates in Angstroms.
+        box: (3, 3) box vectors (row-major, lower-triangular).
+
+    Returns:
+        (n_atoms, 3) wrapped coordinates (new array).
+    """
+    x, y, z = _to_soa(coords)
+    box_flat = np.ascontiguousarray(box.reshape(9), dtype=np.float32)
+
+    _check(
+        get_lib().ztraj_wrap_coords(
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            len(x),
+            _ptr_f32(box_flat),
+        ),
+        "wrap_coords",
+    )
+    return np.column_stack([x, y, z])
+
+
+def minimum_image_distance(
+    pos1: NDArray[np.float32],
+    pos2: NDArray[np.float32],
+    box: NDArray[np.float32],
+) -> float:
+    """Compute minimum image distance between two positions under PBC.
+
+    Args:
+        pos1: (3,) position in Angstroms.
+        pos2: (3,) position in Angstroms.
+        box: (3, 3) box vectors.
+
+    Returns:
+        Minimum image distance in Angstroms.
+    """
+    ffi = get_ffi()
+    box_flat = np.ascontiguousarray(box.reshape(9), dtype=np.float32)
+    result = ffi.new("float*")
+
+    _check(
+        get_lib().ztraj_minimum_image_distance(
+            float(pos1[0]),
+            float(pos1[1]),
+            float(pos1[2]),
+            float(pos2[0]),
+            float(pos2[1]),
+            float(pos2[2]),
+            _ptr_f32(box_flat),
+            result,
+        ),
+        "minimum_image_distance",
+    )
+    return float(result[0])
+
+
+def make_molecules_whole(
+    structure,
+    coords: NDArray[np.float32],
+    box: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    """Make molecules whole across periodic box boundaries.
+
+    Uses bond topology to determine connectivity. Atoms belonging to the
+    same molecule are unwrapped to their nearest image of each other.
+
+    Args:
+        structure: Structure from load_pdb() (must have bond info).
+        coords: (n_atoms, 3) coordinates in Angstroms.
+        box: (3, 3) box vectors.
+
+    Returns:
+        (n_atoms, 3) unwrapped coordinates (new array).
+    """
+    from pyztraj._helpers import _check
+
+    ffi = get_ffi()
+    lib = get_lib()
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+    box_flat = np.ascontiguousarray(box.reshape(9), dtype=np.float32)
+
+    path_bytes = str(structure._pdb_path).encode("utf-8")
+    handle_ptr = ffi.new("void**")
+    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "make_molecules_whole/load_pdb")
+    handle = handle_ptr[0]
+
+    try:
+        _check(
+            lib.ztraj_make_molecules_whole(
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                _ptr_f32(box_flat),
+            ),
+            "make_molecules_whole",
+        )
+    finally:
+        lib.ztraj_free_structure(handle)
+
+    return np.column_stack([x, y, z])

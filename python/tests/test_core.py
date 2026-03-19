@@ -354,3 +354,24 @@ class TestSASA:
         r2 = pyztraj.compute_sasa(struct, struct.coords, n_points=100, probe_radius=2.0)
         # Larger probe should give larger SASA
         assert r2.total_area > r1.total_area
+
+
+class TestPBC:
+    def test_wrap_orthorhombic(self):
+        box = np.diag([10.0, 10.0, 10.0]).astype(np.float32)
+        coords = np.array([[-1.0, 11.0, 25.0]], dtype=np.float32)
+        wrapped = pyztraj.wrap_coords(coords, box)
+        np.testing.assert_allclose(wrapped[0], [9.0, 1.0, 5.0], atol=1e-4)
+
+    def test_minimum_image_distance(self):
+        box = np.diag([10.0, 10.0, 10.0]).astype(np.float32)
+        pos1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        pos2 = np.array([9.0, 0.0, 0.0], dtype=np.float32)
+        dist = pyztraj.minimum_image_distance(pos1, pos2, box)
+        assert dist == pytest.approx(2.0, abs=1e-4)
+
+    def test_minimum_image_same_position(self):
+        box = np.diag([10.0, 10.0, 10.0]).astype(np.float32)
+        pos = np.array([5.0, 5.0, 5.0], dtype=np.float32)
+        dist = pyztraj.minimum_image_distance(pos, pos, box)
+        assert dist == pytest.approx(0.0, abs=1e-6)
