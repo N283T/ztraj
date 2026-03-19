@@ -65,6 +65,10 @@ pub fn main() !void {
         .sasa => runners.runSasa(allocator, args),
         .all => runners.runAll(allocator, args),
         .dssp => runners.runDssp(allocator, args),
+        .phi => runners.runPhi(allocator, args),
+        .psi => runners.runPsi(allocator, args),
+        .omega => runners.runOmega(allocator, args),
+        .chi => runners.runChi(allocator, args),
     };
 
     result catch |err| {
