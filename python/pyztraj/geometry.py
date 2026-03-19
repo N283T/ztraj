@@ -536,3 +536,63 @@ def make_molecules_whole(
         lib.ztraj_free_structure(handle)
 
     return np.column_stack([x, y, z])
+
+
+def compute_msd(
+    frames: list[NDArray[np.float32]],
+    atom_indices: NDArray[np.uint32] | None = None,
+) -> NDArray[np.float64]:
+    """Compute Mean Square Displacement as a function of lag time.
+
+    MSD(τ) = <|r(t+τ) - r(t)|²> averaged over time origins and atoms.
+
+    Args:
+        frames: List of (n_atoms, 3) coordinate arrays.
+        atom_indices: Optional subset of atom indices.
+
+    Returns:
+        (n_frames,) MSD values in Å² for τ = 0, 1, ..., n_frames-1.
+    """
+    if len(frames) == 0:
+        msg = "frames list must not be empty"
+        raise ValueError(msg)
+
+    ffi = get_ffi()
+    lib = get_lib()
+    n_frames = len(frames)
+    n_atoms = frames[0].shape[0]
+
+    all_x = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_y = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_z = np.empty(n_frames * n_atoms, dtype=np.float32)
+
+    for i, frame in enumerate(frames):
+        frame = np.ascontiguousarray(frame, dtype=np.float32)
+        offset = i * n_atoms
+        all_x[offset : offset + n_atoms] = frame[:, 0]
+        all_y[offset : offset + n_atoms] = frame[:, 1]
+        all_z[offset : offset + n_atoms] = frame[:, 2]
+
+    if atom_indices is not None:
+        atom_indices = _as_u32(atom_indices)
+        idx_ptr = _ptr_u32(atom_indices)
+        n_indices = len(atom_indices)
+    else:
+        idx_ptr = ffi.cast("uint32_t*", 0)
+        n_indices = 0
+
+    result = np.empty(n_frames, dtype=np.float64)
+    _check(
+        lib.ztraj_msd(
+            _ptr_f32(all_x),
+            _ptr_f32(all_y),
+            _ptr_f32(all_z),
+            n_frames,
+            n_atoms,
+            idx_ptr,
+            n_indices,
+            _ptr_f64(result),
+        ),
+        "compute_msd",
+    )
+    return result

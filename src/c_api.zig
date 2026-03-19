@@ -22,6 +22,7 @@ const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
 const sasa_mod = @import("analysis/sasa.zig");
 const pbc_mod = @import("geometry/pbc.zig");
+const msd_mod = @import("analysis/msd.zig");
 
 // =============================================================================
 // Error Codes
@@ -1000,6 +1001,58 @@ export fn ztraj_compute_sasa(
 // =============================================================================
 
 /// Parse box from flat 9-element f32 array to [3][3]f32.
+/// Compute MSD as a function of lag time.
+/// `all_x/y/z` are flat contiguous: `all_x[frame * n_atoms + atom]`.
+/// `result` must have `n_frames` elements.
+export fn ztraj_msd(
+    all_x: [*]const f32,
+    all_y: [*]const f32,
+    all_z: [*]const f32,
+    n_frames: usize,
+    n_atoms: usize,
+    atom_indices: ?[*]const u32,
+    n_indices: usize,
+    result: [*]f64,
+) callconv(.c) c_int {
+    if (n_frames == 0 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const indices: ?[]const u32 = if (atom_indices) |ptr|
+        (if (n_indices > 0) ptr[0..n_indices] else null)
+    else
+        null;
+
+    // Build Frame slice from flat data (same pattern as ztraj_rmsf)
+    // SAFETY: msd only reads frame coordinates
+    const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    defer c_allocator.free(frames);
+
+    for (0..n_frames) |f| {
+        const offset = f * n_atoms;
+        frames[f] = .{
+            .x = @constCast(all_x[offset .. offset + n_atoms]),
+            .y = @constCast(all_y[offset .. offset + n_atoms]),
+            .z = @constCast(all_z[offset .. offset + n_atoms]),
+            .box_vectors = null,
+            .time = 0.0,
+            .step = 0,
+            .allocator = c_allocator,
+        };
+    }
+
+    const msd_result = msd_mod.compute(c_allocator, frames, indices) catch |err| {
+        return switch (err) {
+            error.NoFrames => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
+    };
+    defer c_allocator.free(msd_result);
+
+    for (0..n_frames) |i| {
+        result[i] = msd_result[i];
+    }
+    return ZTRAJ_OK;
+}
+
 fn parseBox(box_ptr: [*]const f32) [3][3]f32 {
     var b: [3][3]f32 = undefined;
     for (0..3) |i| {

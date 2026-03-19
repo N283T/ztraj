@@ -106,6 +106,12 @@ _CDEF = """
                                CContact* contacts_out, size_t capacity,
                                size_t* n_found);
 
+    // MSD
+    int ztraj_msd(const float* all_x, const float* all_y, const float* all_z,
+                  size_t n_frames, size_t n_atoms,
+                  const uint32_t* atom_indices, size_t n_indices,
+                  double* result);
+
     // PBC
     int ztraj_wrap_coords(float* x, float* y, float* z,
                           size_t n_atoms, const float* box);
