@@ -1026,6 +1026,7 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
     }
+    if (frames.len == 0) return error.NoFrames;
 
     const dssp_mod = ztraj.dssp;
     const config = dssp_mod.DsspConfigT{};

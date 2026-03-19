@@ -36,7 +36,7 @@ fn getPos(frame: Frame, idx: u32) Vec3f32 {
 }
 
 /// Dihedral angle between four points (degrees). Returns 360 when degenerate.
-fn dihedralAngle(p1: Vec3f32, p2: Vec3f32, p3: Vec3f32, p4: Vec3f32) f32 {
+fn dihedralAngle(p1: Vec3f32, p2: Vec3f32, p3: Vec3f32, p4: Vec3f32) ?f32 {
     const v12 = p1.sub(p2);
     const v43 = p4.sub(p3);
     const z = p2.sub(p3);
@@ -55,22 +55,22 @@ fn dihedralAngle(p1: Vec3f32, p2: Vec3f32, p3: Vec3f32, p4: Vec3f32) f32 {
             return math.atan2(v, u) * (180.0 / math.pi);
         }
     }
-    return 360.0;
+    return null;
 }
 
-/// Cosine of the angle between vectors (p1-p2) and (p3-p4). Returns 0 when degenerate.
-fn cosinusAngle(p1: Vec3f32, p2: Vec3f32, p3: Vec3f32, p4: Vec3f32) f32 {
+/// Cosine of the angle between vectors (p1-p2) and (p3-p4). Returns null when degenerate.
+fn cosinusAngle(p1: Vec3f32, p2: Vec3f32, p3: Vec3f32, p4: Vec3f32) ?f32 {
     const v12 = p1.sub(p2);
     const v34 = p3.sub(p4);
     const denom = v12.dot(v12) * v34.dot(v34);
     if (denom > 0) return v12.dot(v34) / @sqrt(denom);
-    return 0.0;
+    return null;
 }
 
 /// Virtual bond angle at CA(i) defined by CA(i-2), CA(i), CA(i+2) (degrees).
-fn kappaAngle(ca_prev2: Vec3f32, ca: Vec3f32, ca_next2: Vec3f32) f32 {
-    const cosine = cosinusAngle(ca, ca_prev2, ca_next2, ca);
-    const clamped = math.clamp(cosine, -1.0, 1.0);
+fn kappaAngle(ca_prev2: Vec3f32, ca: Vec3f32, ca_next2: Vec3f32) ?f32 {
+    const cosine = cosinusAngle(ca, ca_prev2, ca_next2, ca) orelse return null;
+    const clamped = math.clamp(cosine, @as(f32, -1.0), @as(f32, 1.0));
     return math.acos(clamped) * (180.0 / math.pi);
 }
 
@@ -178,6 +178,9 @@ pub fn compute(
     frame: Frame,
     config: DsspConfig,
 ) !DsspResult {
+    // Validate topology/frame consistency
+    if (topology.atoms.len != frame.nAtoms()) return error.TopologyFrameMismatch;
+
     // Step 1: Extract backbone atom indices
     const all_residues = try backbone.extractBackbone(allocator, topology, frame);
     defer allocator.free(all_residues);
@@ -187,6 +190,8 @@ pub fn compute(
     for (all_residues) |res| {
         if (res.complete) complete_count += 1;
     }
+
+    if (complete_count == 0) return error.NoCompleteResidues;
 
     const residues = try allocator.alloc(DsspResidue, complete_count);
     errdefer allocator.free(residues);
@@ -450,7 +455,7 @@ test "dihedralAngle - coplanar points give 0 degrees" {
     const p2 = Vec3f32{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const p3 = Vec3f32{ .x = 0.0, .y = 1.0, .z = 0.0 };
     const p4 = Vec3f32{ .x = 1.0, .y = 1.0, .z = 0.0 };
-    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dihedralAngle(p1, p2, p3, p4), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dihedralAngle(p1, p2, p3, p4).?, 0.01);
 }
 
 test "dihedralAngle - 90 degrees" {
@@ -458,7 +463,7 @@ test "dihedralAngle - 90 degrees" {
     const p2 = Vec3f32{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const p3 = Vec3f32{ .x = 0.0, .y = 1.0, .z = 0.0 };
     const p4 = Vec3f32{ .x = 0.0, .y = 1.0, .z = -1.0 };
-    try std.testing.expectApproxEqAbs(@as(f32, 90.0), dihedralAngle(p1, p2, p3, p4), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 90.0), dihedralAngle(p1, p2, p3, p4).?, 0.01);
 }
 
 test "cosinusAngle - parallel vectors" {
@@ -466,12 +471,12 @@ test "cosinusAngle - parallel vectors" {
     const p2 = Vec3f32{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const p3 = Vec3f32{ .x = 3.0, .y = 0.0, .z = 0.0 };
     const p4 = Vec3f32{ .x = 1.0, .y = 0.0, .z = 0.0 };
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), cosinusAngle(p1, p2, p3, p4), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), cosinusAngle(p1, p2, p3, p4).?, 1e-6);
 }
 
 test "kappaAngle - straight chain gives 0 degrees" {
     const ca_prev2 = Vec3f32{ .x = -2.0, .y = 0.0, .z = 0.0 };
     const ca = Vec3f32{ .x = 0.0, .y = 0.0, .z = 0.0 };
     const ca_next2 = Vec3f32{ .x = 2.0, .y = 0.0, .z = 0.0 };
-    try std.testing.expectApproxEqAbs(@as(f32, 0.0), kappaAngle(ca_prev2, ca, ca_next2), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), kappaAngle(ca_prev2, ca, ca_next2).?, 0.01);
 }

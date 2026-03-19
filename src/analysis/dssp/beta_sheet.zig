@@ -162,6 +162,7 @@ pub fn calculateBetaSheets(
                 .bridge_type = bt,
                 .chain_index = residues[i].chain_index,
             };
+            errdefer new_bridge.deinit(allocator);
             try new_bridge.i_indices.append(allocator, i);
             try new_bridge.j_indices.append(allocator, j);
             try bridges.append(allocator, new_bridge);

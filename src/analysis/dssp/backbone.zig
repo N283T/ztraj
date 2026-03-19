@@ -145,9 +145,11 @@ pub fn assignHydrogen(residues: []DsspResidue, frame: Frame) void {
         const co = prev_o.sub(prev_c);
         const co_len = co.length();
         if (co_len < 1e-6) {
-            res.h_x = 0;
-            res.h_y = 0;
-            res.h_z = 0;
+            // Degenerate C=O bond — place H at N position (self-bonding
+            // will be rejected by distance checks in H-bond calculation)
+            res.h_x = n.x;
+            res.h_y = n.y;
+            res.h_z = n.z;
             continue;
         }
         const unit_co = co.scale(1.0 / co_len);
