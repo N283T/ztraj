@@ -44,10 +44,20 @@ def compute_rdf(
 
     _check(
         get_lib().ztraj_rdf(
-            _ptr_f32(s1_x), _ptr_f32(s1_y), _ptr_f32(s1_z), len(s1_x),
-            _ptr_f32(s2_x), _ptr_f32(s2_y), _ptr_f32(s2_z), len(s2_x),
-            box_volume, r_min, r_max, n_bins,
-            _ptr_f64(r_out), _ptr_f64(g_r_out),
+            _ptr_f32(s1_x),
+            _ptr_f32(s1_y),
+            _ptr_f32(s1_z),
+            len(s1_x),
+            _ptr_f32(s2_x),
+            _ptr_f32(s2_y),
+            _ptr_f32(s2_z),
+            len(s2_x),
+            box_volume,
+            r_min,
+            r_max,
+            n_bins,
+            _ptr_f64(r_out),
+            _ptr_f64(g_r_out),
         ),
         "compute_rdf",
     )
@@ -105,9 +115,16 @@ def detect_hbonds(
 
         _check(
             lib.ztraj_detect_hbonds(
-                handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-                n_atoms, dist_cutoff, angle_cutoff,
-                hbonds_buf, capacity, n_found,
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                dist_cutoff,
+                angle_cutoff,
+                hbonds_buf,
+                capacity,
+                n_found,
             ),
             "detect_hbonds",
         )
@@ -118,9 +135,16 @@ def detect_hbonds(
             hbonds_buf = ffi.new(f"CHBond[{actual}]")
             _check(
                 lib.ztraj_detect_hbonds(
-                    handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-                    n_atoms, dist_cutoff, angle_cutoff,
-                    hbonds_buf, actual, n_found,
+                    handle,
+                    _ptr_f32(x),
+                    _ptr_f32(y),
+                    _ptr_f32(z),
+                    n_atoms,
+                    dist_cutoff,
+                    angle_cutoff,
+                    hbonds_buf,
+                    actual,
+                    n_found,
                 ),
                 "detect_hbonds",
             )
@@ -193,9 +217,16 @@ def compute_contacts(
 
         _check(
             lib.ztraj_compute_contacts(
-                handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-                n_atoms, scheme_int, cutoff,
-                contacts_buf, capacity, n_found,
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                scheme_int,
+                cutoff,
+                contacts_buf,
+                capacity,
+                n_found,
             ),
             "compute_contacts",
         )
@@ -206,9 +237,16 @@ def compute_contacts(
             contacts_buf = ffi.new(f"CContact[{actual}]")
             _check(
                 lib.ztraj_compute_contacts(
-                    handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-                    n_atoms, scheme_int, cutoff,
-                    contacts_buf, actual, n_found,
+                    handle,
+                    _ptr_f32(x),
+                    _ptr_f32(y),
+                    _ptr_f32(z),
+                    n_atoms,
+                    scheme_int,
+                    cutoff,
+                    contacts_buf,
+                    actual,
+                    n_found,
                 ),
                 "compute_contacts",
             )
@@ -283,9 +321,16 @@ def compute_sasa(
 
         _check(
             lib.ztraj_compute_sasa(
-                handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-                n_atoms, n_points, probe_radius, n_threads,
-                _ptr_f64(atom_areas), total_area,
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                n_points,
+                probe_radius,
+                n_threads,
+                _ptr_f64(atom_areas),
+                total_area,
             ),
             "compute_sasa",
         )

@@ -32,8 +32,13 @@ def compute_distances(
     result = np.empty(n_pairs, dtype=np.float32)
     _check(
         get_lib().ztraj_distances(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            len(x), _ptr_u32(pairs), n_pairs, _ptr_f32(result),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            len(x),
+            _ptr_u32(pairs),
+            n_pairs,
+            _ptr_f32(result),
         )
     )
     return result
@@ -58,8 +63,13 @@ def compute_angles(
     result = np.empty(n_triplets, dtype=np.float32)
     _check(
         get_lib().ztraj_angles(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            len(x), _ptr_u32(triplets), n_triplets, _ptr_f32(result),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            len(x),
+            _ptr_u32(triplets),
+            n_triplets,
+            _ptr_f32(result),
         )
     )
     return result
@@ -84,8 +94,13 @@ def compute_dihedrals(
     result = np.empty(n_quartets, dtype=np.float32)
     _check(
         get_lib().ztraj_dihedrals(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            len(x), _ptr_u32(quartets), n_quartets, _ptr_f32(result),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            len(x),
+            _ptr_u32(quartets),
+            n_quartets,
+            _ptr_f32(result),
         )
     )
     return result
@@ -127,9 +142,16 @@ def compute_rmsd(
     result = ffi.new("double*")
     _check(
         get_lib().ztraj_rmsd(
-            _ptr_f32(ref_x), _ptr_f32(ref_y), _ptr_f32(ref_z),
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            idx_ptr, n_indices, n_atoms, result,
+            _ptr_f32(ref_x),
+            _ptr_f32(ref_y),
+            _ptr_f32(ref_z),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            idx_ptr,
+            n_indices,
+            n_atoms,
+            result,
         )
     )
     return float(result[0])
@@ -166,8 +188,14 @@ def compute_rg(
     result = ffi.new("double*")
     _check(
         get_lib().ztraj_rg(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            _ptr_f64(masses), idx_ptr, n_indices, n_atoms, result,
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            _ptr_f64(masses),
+            idx_ptr,
+            n_indices,
+            n_atoms,
+            result,
         )
     )
     return float(result[0])
@@ -206,8 +234,16 @@ def compute_center_of_mass(
     cz = ffi.new("double*")
     _check(
         get_lib().ztraj_center_of_mass(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            _ptr_f64(masses), idx_ptr, n_indices, n_atoms, cx, cy, cz,
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            _ptr_f64(masses),
+            idx_ptr,
+            n_indices,
+            n_atoms,
+            cx,
+            cy,
+            cz,
         )
     )
     return np.array([cx[0], cy[0], cz[0]], dtype=np.float64)
@@ -243,8 +279,15 @@ def compute_center_of_geometry(
     cz = ffi.new("double*")
     _check(
         get_lib().ztraj_center_of_geometry(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            idx_ptr, n_indices, n_atoms, cx, cy, cz,
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            idx_ptr,
+            n_indices,
+            n_atoms,
+            cx,
+            cy,
+            cz,
         )
     )
     return np.array([cx[0], cy[0], cz[0]], dtype=np.float64)
@@ -281,8 +324,14 @@ def compute_inertia(
     result = np.empty(9, dtype=np.float64)
     _check(
         get_lib().ztraj_inertia(
-            _ptr_f32(x), _ptr_f32(y), _ptr_f32(z),
-            _ptr_f64(masses), idx_ptr, n_indices, n_atoms, _ptr_f64(result),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            _ptr_f64(masses),
+            idx_ptr,
+            n_indices,
+            n_atoms,
+            _ptr_f64(result),
         )
     )
     return result.reshape(3, 3)
@@ -355,8 +404,14 @@ def compute_rmsf(
     result = np.empty(n_out, dtype=np.float64)
     _check(
         lib.ztraj_rmsf(
-            _ptr_f32(all_x), _ptr_f32(all_y), _ptr_f32(all_z),
-            n_frames, n_atoms, idx_ptr, n_indices, _ptr_f64(result),
+            _ptr_f32(all_x),
+            _ptr_f32(all_y),
+            _ptr_f32(all_z),
+            n_frames,
+            n_atoms,
+            idx_ptr,
+            n_indices,
+            _ptr_f64(result),
         ),
         "compute_rmsf",
     )
