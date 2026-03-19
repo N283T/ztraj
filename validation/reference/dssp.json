@@ -1,0 +1,6 @@
+{
+  "description": "DSSP secondary structure assignment (frame 0, 8-state)",
+  "system": "3tvj_I",
+  "n_residues": 38,
+  "ss": "        TT EEEETTEEEEE TTSS EEE S     "
+}
