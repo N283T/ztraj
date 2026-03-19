@@ -2,7 +2,6 @@
 
 from pyztraj._ffi import get_ffi, get_lib
 from pyztraj._helpers import ZtrajError
-from pyztraj.combined import analyze_all
 from pyztraj.analysis import (
     Contact,
     HBond,
@@ -12,6 +11,7 @@ from pyztraj.analysis import (
     compute_sasa,
     detect_hbonds,
 )
+from pyztraj.combined import analyze_all
 from pyztraj.geometry import (
     compute_angles,
     compute_center_of_geometry,
