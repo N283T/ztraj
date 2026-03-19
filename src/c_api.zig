@@ -22,6 +22,8 @@ const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
 const sasa_mod = @import("analysis/sasa.zig");
 const native_contacts_mod = @import("analysis/native_contacts.zig");
+const msd_mod = @import("analysis/msd.zig");
+const pca_mod = @import("analysis/pca.zig");
 const pbc_mod = @import("geometry/pbc.zig");
 
 // =============================================================================
@@ -1041,6 +1043,103 @@ export fn ztraj_native_contacts_q(
         indices_b[0..n_b],
         cutoff,
     );
+    return ZTRAJ_OK;
+}
+
+/// Compute MSD as a function of lag time.
+export fn ztraj_msd(
+    all_x: [*]const f32,
+    all_y: [*]const f32,
+    all_z: [*]const f32,
+    n_frames: usize,
+    n_atoms: usize,
+    atom_indices: ?[*]const u32,
+    n_indices: usize,
+    result: [*]f64,
+) callconv(.c) c_int {
+    if (n_frames == 0 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const indices: ?[]const u32 = if (atom_indices) |ptr|
+        (if (n_indices > 0) ptr[0..n_indices] else null)
+    else
+        null;
+
+    // SAFETY: msd only reads frame coordinates
+    const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    defer c_allocator.free(frames);
+
+    for (0..n_frames) |f| {
+        const offset = f * n_atoms;
+        frames[f] = .{
+            .x = @constCast(all_x[offset .. offset + n_atoms]),
+            .y = @constCast(all_y[offset .. offset + n_atoms]),
+            .z = @constCast(all_z[offset .. offset + n_atoms]),
+            .box_vectors = null,
+            .time = 0.0,
+            .step = 0,
+            .allocator = c_allocator,
+        };
+    }
+
+    const msd_result = msd_mod.compute(c_allocator, frames, indices) catch |err| {
+        return switch (err) {
+            error.NoFrames, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
+    };
+    defer c_allocator.free(msd_result);
+
+    @memcpy(result[0..n_frames], msd_result);
+    return ZTRAJ_OK;
+}
+
+/// Compute PCA covariance matrix of coordinate fluctuations.
+export fn ztraj_pca_covariance(
+    all_x: [*]const f32,
+    all_y: [*]const f32,
+    all_z: [*]const f32,
+    n_frames: usize,
+    n_atoms: usize,
+    atom_indices: ?[*]const u32,
+    n_indices: usize,
+    cov_out: [*]f64,
+) callconv(.c) c_int {
+    if (n_frames < 2 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const indices: ?[]const u32 = if (atom_indices) |ptr|
+        (if (n_indices > 0) ptr[0..n_indices] else null)
+    else
+        null;
+
+    // SAFETY: pca only reads frame coordinates
+    const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    defer c_allocator.free(frames);
+
+    for (0..n_frames) |f| {
+        const offset = f * n_atoms;
+        frames[f] = .{
+            .x = @constCast(all_x[offset .. offset + n_atoms]),
+            .y = @constCast(all_y[offset .. offset + n_atoms]),
+            .z = @constCast(all_z[offset .. offset + n_atoms]),
+            .box_vectors = null,
+            .time = 0.0,
+            .step = 0,
+            .allocator = c_allocator,
+        };
+    }
+
+    const cov = pca_mod.computeCovarianceMatrix(c_allocator, frames, indices) catch |err| {
+        return switch (err) {
+            error.TooFewFrames, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
+    };
+    defer c_allocator.free(cov);
+
+    const n_sel = if (indices) |idx| idx.len else n_atoms;
+    const dim = n_sel * 3;
+    @memcpy(cov_out[0 .. dim * dim], cov);
+
     return ZTRAJ_OK;
 }
 
