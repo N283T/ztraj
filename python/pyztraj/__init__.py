@@ -3,6 +3,7 @@
 from pyztraj.core import (
     Contact,
     HBond,
+    SasaResult,
     Structure,
     XtcReader,
     ZtrajError,
@@ -18,6 +19,7 @@ from pyztraj.core import (
     compute_rg,
     compute_rmsd,
     compute_rmsf,
+    compute_sasa,
     detect_hbonds,
     get_version,
     load_pdb,
@@ -27,6 +29,7 @@ from pyztraj.core import (
 __all__ = [
     "Contact",
     "HBond",
+    "SasaResult",
     "Structure",
     "XtcReader",
     "ZtrajError",
@@ -42,6 +45,7 @@ __all__ = [
     "compute_rg",
     "compute_rmsd",
     "compute_rmsf",
+    "compute_sasa",
     "detect_hbonds",
     "get_version",
     "load_pdb",

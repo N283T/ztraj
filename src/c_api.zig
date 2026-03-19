@@ -20,6 +20,7 @@ const xtc_mod = @import("io/xtc.zig");
 const hbonds_mod = @import("analysis/hbonds.zig");
 const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
+const sasa_mod = @import("analysis/sasa.zig");
 
 // =============================================================================
 // Error Codes
@@ -932,6 +933,57 @@ export fn ztraj_compute_contacts(
             .distance = contacts[i].distance,
         };
     }
+
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Analysis: SASA (Solvent Accessible Surface Area)
+// =============================================================================
+
+/// Compute SASA using the Shrake-Rupley algorithm.
+///
+/// Uses topology from `structure_handle` for element-based VdW radii.
+/// `x/y/z` are coordinates for the frame to analyze.
+/// `atom_areas` must have at least `n_atoms` elements.
+/// `total_area` receives the total SASA.
+export fn ztraj_compute_sasa(
+    structure_handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    n_points: u32,
+    probe_radius: f64,
+    n_threads: usize,
+    atom_areas: [*]f64,
+    total_area: *f64,
+) callconv(.c) c_int {
+    const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const config = sasa_mod.SasaConfig{
+        .n_points = if (n_points == 0) 100 else n_points,
+        .probe_radius = if (probe_radius <= 0.0) 1.4 else probe_radius,
+        .n_threads = n_threads,
+    };
+
+    var result = sasa_mod.compute(
+        c_allocator,
+        x[0..n_atoms],
+        y[0..n_atoms],
+        z[0..n_atoms],
+        h.parse_result.topology,
+        null,
+        config,
+    ) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer result.deinit();
+
+    total_area.* = result.total_area;
+    @memcpy(atom_areas[0..n_atoms], result.atom_areas);
 
     return ZTRAJ_OK;
 }

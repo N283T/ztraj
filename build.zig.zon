@@ -8,6 +8,10 @@
             .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.1.1#ef0e63dfd74eae5f3a0b49d19fac002989c0a351",
             .hash = "zxdrfile-0.1.1-JIaQ9ir5AACu7dbzJDk9taGRu7tRROckg6kClL58b9dP",
         },
+        .zsasa = .{
+            .url = "git+https://github.com/N283T/freesasa-zig.git?ref=v0.2.4",
+            .hash = "zsasa-0.2.4-d7uHxM_KDABCLaSpqZFoO6LCEY_z8oJQD6i_v5eAKGuK",
+        },
     },
     .paths = .{
         "build.zig",

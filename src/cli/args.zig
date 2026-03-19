@@ -20,6 +20,7 @@ pub const Subcommand = enum {
     hbonds,
     contacts,
     rdf,
+    sasa,
 };
 
 // ============================================================================
@@ -84,6 +85,7 @@ pub fn printUsage(prog: []const u8) void {
         \\  hbonds      Hydrogen bond detection per frame
         \\  contacts    Residue-residue contacts per frame
         \\  rdf         Radial distribution function g(r)
+        \\  sasa        Solvent accessible surface area (Shrake-Rupley)
         \\
         \\Common options:
         \\  --top <file>           Topology file (PDB or mmCIF); required unless traj is PDB/CIF
@@ -143,6 +145,7 @@ pub fn parseArgs(raw: []const []const u8) ParseArgsError!Args {
         if (std.mem.eql(u8, sub_str, "hbonds")) break :blk .hbonds;
         if (std.mem.eql(u8, sub_str, "contacts")) break :blk .contacts;
         if (std.mem.eql(u8, sub_str, "rdf")) break :blk .rdf;
+        if (std.mem.eql(u8, sub_str, "sasa")) break :blk .sasa;
         return ParseArgsError.UnknownSubcommand;
     };
 

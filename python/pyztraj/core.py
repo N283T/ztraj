@@ -934,3 +934,74 @@ def compute_contacts(
         ]
     finally:
         lib.ztraj_free_structure(handle)
+
+
+@dataclass
+class SasaResult:
+    """SASA calculation result."""
+
+    total_area: float  # total SASA in Å²
+    atom_areas: NDArray[np.float64]  # per-atom SASA (n_atoms,) in Å²
+
+
+def compute_sasa(
+    structure: Structure,
+    coords: NDArray[np.float32],
+    n_points: int = 100,
+    probe_radius: float = 1.4,
+    n_threads: int = 0,
+) -> SasaResult:
+    """Compute Solvent Accessible Surface Area using Shrake-Rupley algorithm.
+
+    Uses element-based van der Waals radii from the structure topology.
+
+    Args:
+        structure: Structure from load_pdb().
+        coords: (n_atoms, 3) coordinates in Angstroms.
+        n_points: Number of test points per atom sphere. Default 100.
+        probe_radius: Probe radius in Angstroms. Default 1.4 (water).
+        n_threads: Number of threads (0 = auto-detect). Default 0.
+
+    Returns:
+        SasaResult with total_area and per-atom atom_areas.
+    """
+    ffi = get_ffi()
+    lib = get_lib()
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+
+    if n_atoms != structure.n_atoms:
+        msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
+        raise ValueError(msg)
+
+    path_bytes = str(structure._pdb_path).encode("utf-8")
+    handle_ptr = ffi.new("void**")
+    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "compute_sasa/load_pdb")
+    handle = handle_ptr[0]
+
+    try:
+        atom_areas = np.empty(n_atoms, dtype=np.float64)
+        total_area = ffi.new("double*")
+
+        _check(
+            lib.ztraj_compute_sasa(
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                n_points,
+                probe_radius,
+                n_threads,
+                _ptr_f64(atom_areas),
+                total_area,
+            ),
+            "compute_sasa",
+        )
+
+        return SasaResult(
+            total_area=float(total_area[0]),
+            atom_areas=atom_areas,
+        )
+    finally:
+        lib.ztraj_free_structure(handle)

@@ -828,3 +828,45 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
     }
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommand: sasa
+// ============================================================================
+
+pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
+    const top_path = args.top_path orelse args.traj_path;
+    var parsed = try loader.loadTopology(allocator, top_path);
+    defer parsed.deinit();
+
+    const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
+    defer if (atom_indices) |ai| allocator.free(ai);
+
+    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    defer {
+        for (frames) |*f| @constCast(f).deinit();
+        allocator.free(frames);
+    }
+
+    // Per-frame total SASA
+    const sasa_vals = try allocator.alloc(f64, frames.len);
+    defer allocator.free(sasa_vals);
+
+    for (frames, 0..) |frame, fi| {
+        var result = try analysis.sasa.compute(
+            allocator,
+            frame.x,
+            frame.y,
+            frame.z,
+            parsed.topology,
+            atom_indices,
+            .{ .n_points = 100, .probe_radius = 1.4, .n_threads = 0 },
+        );
+        defer result.deinit();
+        sasa_vals[fi] = result.total_area;
+    }
+
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    try writeScalarSeriesBuf(allocator, &buf, args.format, "sasa", sasa_vals);
+    try flushOutput(buf.items, args.output_path);
+}

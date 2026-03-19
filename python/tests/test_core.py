@@ -275,3 +275,25 @@ class TestContacts:
         struct = pyztraj.load_pdb(pdb_path)
         with pytest.raises(ValueError, match="Unknown scheme"):
             pyztraj.compute_contacts(struct, struct.coords, scheme="invalid")
+
+
+class TestSASA:
+    def test_compute_from_pdb(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        result = pyztraj.compute_sasa(struct, struct.coords)
+        assert isinstance(result, pyztraj.SasaResult)
+        assert result.total_area > 0
+        assert result.atom_areas.shape == (struct.n_atoms,)
+        assert np.all(result.atom_areas >= 0)
+
+    def test_total_equals_sum_of_atoms(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        result = pyztraj.compute_sasa(struct, struct.coords, n_points=100)
+        np.testing.assert_allclose(result.total_area, result.atom_areas.sum(), rtol=1e-6)
+
+    def test_custom_parameters(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        r1 = pyztraj.compute_sasa(struct, struct.coords, n_points=100, probe_radius=1.4)
+        r2 = pyztraj.compute_sasa(struct, struct.coords, n_points=100, probe_radius=2.0)
+        # Larger probe should give larger SASA
+        assert r2.total_area > r1.total_area

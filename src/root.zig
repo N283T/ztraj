@@ -25,6 +25,7 @@ pub const analysis = struct {
     pub const hbonds = @import("analysis/hbonds.zig");
     pub const contacts = @import("analysis/contacts.zig");
     pub const rdf = @import("analysis/rdf.zig");
+    pub const sasa = @import("analysis/sasa.zig");
 };
 
 pub const io = struct {

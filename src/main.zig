@@ -62,6 +62,7 @@ pub fn main() !void {
         .hbonds => runners.runHbonds(allocator, args),
         .contacts => runners.runContacts(allocator, args),
         .rdf => runners.runRdf(allocator, args),
+        .sasa => runners.runSasa(allocator, args),
     };
 
     result catch |err| {
