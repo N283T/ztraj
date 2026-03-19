@@ -260,6 +260,65 @@ def validate_atlas_rg(ztraj: str) -> bool | None:
     )
 
 
+def validate_dssp(ztraj: str) -> bool:
+    """Validate DSSP secondary structure assignment against mdtraj."""
+    print("\n=== DSSP ===")
+    ref = load_ref("dssp")
+    ref_ss = ref["ss"]
+
+    out = run_ztraj(ztraj, ["dssp", PDB, "--format", "json"])
+    ztraj_ss = "".join(r["ss"] for r in out)
+
+    print(f"    mdtraj residues: {len(ref_ss)}, ztraj residues: {len(ztraj_ss)}")
+    print(f"    mdtraj SS: {ref_ss}")
+    print(f"    ztraj  SS: {ztraj_ss}")
+
+    # mdtraj and ztraj may differ in residue count (terminal residue handling).
+    # Compare the overlapping portion.
+    min_len = min(len(ref_ss), len(ztraj_ss))
+    if min_len == 0:
+        print("  FAIL: no residues to compare")
+        return False
+
+    matches = sum(1 for a, b in zip(ref_ss[:min_len], ztraj_ss[:min_len]) if a == b)
+    match_pct = matches / min_len * 100
+
+    # DSSP implementations can differ on boundaries (turns vs loops).
+    # Accept >= 80% agreement as PASS.
+    threshold = 80.0
+    status = "PASS" if match_pct >= threshold else "FAIL"
+    print(
+        f"  {status}: dssp agreement {matches}/{min_len} ({match_pct:.1f}%), threshold {threshold}%"
+    )
+    return bool(match_pct >= threshold)
+
+
+def validate_sasa(ztraj: str) -> bool:
+    """Validate SASA against mdtraj (Shrake-Rupley, loose tolerance)."""
+    print("\n=== SASA ===")
+    ref = load_ref("sasa")
+    ref_total = ref["total"]
+    ref_atoms = np.asarray(ref["atom_areas"])
+
+    out = run_ztraj(ztraj, ["sasa", PDB, "--format", "json"])
+    ztraj_total = out["sasa"][0]
+
+    print(f"    mdtraj total: {ref_total:.1f} Å², ztraj total: {ztraj_total:.1f} Å²")
+
+    # Different point generation (Fibonacci vs golden section) causes systematic
+    # differences. Use relative tolerance.
+    rel_diff = abs(ztraj_total - ref_total) / ref_total * 100
+    print(f"    relative diff: {rel_diff:.1f}%")
+
+    # Accept <= 10% relative difference in total SASA
+    threshold = 10.0
+    status = "PASS" if rel_diff <= threshold else "FAIL"
+    print(
+        f"  {status}: sasa total relative diff {rel_diff:.1f}%, threshold {threshold}%"
+    )
+    return bool(rel_diff <= threshold)
+
+
 def main() -> None:
     ztraj = DEFAULT_ZTRAJ
     for i, arg in enumerate(sys.argv[1:], 1):
@@ -285,6 +344,8 @@ def main() -> None:
         ("Center of Mass", validate_center_of_mass),
         ("ATLAS RMSD", validate_atlas_rmsd),
         ("ATLAS Rg", validate_atlas_rg),
+        ("DSSP", validate_dssp),
+        ("SASA", validate_sasa),
     ]
 
     results: dict[str, bool | None] = {}

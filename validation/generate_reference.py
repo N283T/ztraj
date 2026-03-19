@@ -161,6 +161,43 @@ def gen_center_of_mass() -> None:
     )
 
 
+def gen_dssp() -> None:
+    """Generate DSSP reference: per-residue SS for frame 0 (PDB only)."""
+    traj = md.load(PDB)
+    dssp = md.compute_dssp(traj, simplified=False)  # full 8-state
+    # dssp returns array of shape (n_frames, n_residues) with single-char strings
+    ss_string = "".join(dssp[0])
+
+    save_json(
+        "dssp",
+        {
+            "description": "DSSP secondary structure assignment (frame 0, 8-state)",
+            "system": "3tvj_I",
+            "n_residues": traj.n_residues,
+            "ss": ss_string,
+        },
+    )
+
+
+def gen_sasa() -> None:
+    """Generate SASA reference: per-atom SASA for frame 0."""
+    traj = md.load(PDB)
+    # mdtraj.shrake_rupley returns nm², convert to Å²
+    sasa = md.shrake_rupley(traj, n_sphere_points=960, mode="atom")
+    sasa_ang2 = (sasa[0] * 100.0).tolist()  # nm² → Å²
+
+    save_json(
+        "sasa",
+        {
+            "description": "SASA per atom, frame 0, Shrake-Rupley (960 points), angstrom^2",
+            "system": "3tvj_I",
+            "n_atoms": traj.n_atoms,
+            "total": float(np.sum(sasa[0]) * 100.0),
+            "atom_areas": sasa_ang2,
+        },
+    )
+
+
 def main() -> None:
     print("Generating mdtraj reference values for 3tvj_I_R1...")
     print(f"  PDB: {PDB}")
@@ -175,6 +212,8 @@ def main() -> None:
         ("Angles", gen_angles),
         ("Dihedrals", gen_dihedrals),
         ("Center of mass", gen_center_of_mass),
+        ("DSSP", gen_dssp),
+        ("SASA", gen_sasa),
     ]
 
     failed = []
