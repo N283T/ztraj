@@ -965,6 +965,16 @@ def compute_sasa(
     Returns:
         SasaResult with total_area and per-atom atom_areas.
     """
+    if n_points < 1:
+        msg = f"n_points must be >= 1, got {n_points}"
+        raise ValueError(msg)
+    if probe_radius <= 0.0:
+        msg = f"probe_radius must be > 0, got {probe_radius}"
+        raise ValueError(msg)
+    if n_threads < 0:
+        msg = f"n_threads must be >= 0, got {n_threads}"
+        raise ValueError(msg)
+
     ffi = get_ffi()
     lib = get_lib()
     x, y, z = _to_soa(coords)

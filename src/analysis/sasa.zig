@@ -53,8 +53,16 @@ pub fn compute(
     atom_indices: ?[]const u32,
     config: SasaConfig,
 ) !SasaOutput {
-    const n_selected = if (atom_indices) |idx| idx.len else x.len;
+    const n_atoms = x.len;
+    const n_selected = if (atom_indices) |idx| idx.len else n_atoms;
     if (n_selected == 0) return error.NoAtoms;
+
+    // Bounds-check atom indices
+    if (atom_indices) |indices| {
+        for (indices) |idx| {
+            if (idx >= n_atoms or idx >= topology.atoms.len) return error.IndexOutOfBounds;
+        }
+    }
 
     // Convert f32 SOA coords to f64 for zsasa
     const x64 = try allocator.alloc(f64, n_selected);

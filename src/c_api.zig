@@ -962,10 +962,12 @@ export fn ztraj_compute_sasa(
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_points == 0) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (probe_radius <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const config = sasa_mod.SasaConfig{
-        .n_points = if (n_points == 0) 100 else n_points,
-        .probe_radius = if (probe_radius <= 0.0) 1.4 else probe_radius,
+        .n_points = n_points,
+        .probe_radius = probe_radius,
         .n_threads = n_threads,
     };
 
@@ -977,8 +979,12 @@ export fn ztraj_compute_sasa(
         h.parse_result.topology,
         null,
         config,
-    ) catch {
-        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    ) catch |err| {
+        return switch (err) {
+            error.NoAtoms, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
     };
     defer result.deinit();
 
