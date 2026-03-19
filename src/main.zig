@@ -64,6 +64,7 @@ pub fn main() !void {
         .rdf => runners.runRdf(allocator, args),
         .sasa => runners.runSasa(allocator, args),
         .all => runners.runAll(allocator, args),
+        .dssp => runners.runDssp(allocator, args),
     };
 
     result catch |err| {

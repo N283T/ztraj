@@ -39,6 +39,12 @@ pub const io = struct {
 pub const select = @import("select.zig");
 pub const output = @import("output.zig");
 
+/// DSSP secondary structure assignment (adapted from zdssp).
+/// Not included in refAllDecls to avoid pulling zdssp's test suite.
+pub const dssp = @import("dssp/root.zig");
+
 test {
+    // Use refAllDecls (non-recursive) to avoid pulling dssp's test suite
+    // and pdb.zig's @embedFile path issues
     @import("std").testing.refAllDecls(@This());
 }

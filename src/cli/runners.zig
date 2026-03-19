@@ -1011,3 +1011,82 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
 
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommand: dssp
+// ============================================================================
+
+pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
+    const dssp_mod = ztraj.dssp;
+    const pdb_parser = dssp_mod.pdb_parser;
+    const mmcif_parser = dssp_mod.mmcif_parser;
+    const dssp_calc = dssp_mod.dssp;
+
+    const path = args.traj_path;
+
+    // Detect format and parse
+    const is_cif = std.mem.endsWith(u8, path, ".cif") or std.mem.endsWith(u8, path, ".mmcif");
+    const parse_result = if (is_cif) blk: {
+        var parser = mmcif_parser.MmcifParser.init(allocator);
+        break :blk parser.parseFile(path) catch return error.ParseFailed;
+    } else blk: {
+        var parser = pdb_parser.PdbParser.init(allocator);
+        break :blk parser.parseFile(path) catch return error.ParseFailed;
+    };
+
+    // Run DSSP
+    const config = dssp_calc.DsspConfig{
+        .calculate_accessibility = true,
+        .n_threads = 0,
+    };
+    var result = dssp_calc.calculateFromParseResult(allocator, parse_result, config) catch {
+        return error.DsspFailed;
+    };
+    defer result.deinit();
+
+    // Output
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    switch (args.format) {
+        .json => {
+            try w.writeAll("[\n");
+            for (result.residues, 0..) |res, i| {
+                if (i > 0) try w.writeAll(",\n");
+                try w.print(
+                    "  {{\"index\": {d}, \"chain\": \"{s}\", \"resid\": {d}, \"resname\": \"{s}\", \"ss\": \"{c}\", \"acc\": {d:.1}}}",
+                    .{
+                        i,
+                        std.mem.trimRight(u8, &res.chain_id, " "),
+                        res.seq_id,
+                        std.mem.trimRight(u8, &res.compound_id, " "),
+                        res.secondary_structure.toChar(),
+                        res.accessibility,
+                    },
+                );
+            }
+            try w.writeAll("\n]\n");
+        },
+        .csv, .tsv => {
+            const delim: u8 = if (args.format == .csv) ',' else '\t';
+            try w.print("index{c}chain{c}resid{c}resname{c}ss{c}acc\n", .{ delim, delim, delim, delim, delim });
+            for (result.residues, 0..) |res, i| {
+                try w.print("{d}{c}{s}{c}{d}{c}{s}{c}{c}{c}{d:.1}\n", .{
+                    i,
+                    delim,
+                    std.mem.trimRight(u8, &res.chain_id, " "),
+                    delim,
+                    res.seq_id,
+                    delim,
+                    std.mem.trimRight(u8, &res.compound_id, " "),
+                    delim,
+                    res.secondary_structure.toChar(),
+                    delim,
+                    res.accessibility,
+                });
+            }
+        },
+    }
+    try flushOutput(buf.items, args.output_path);
+}
