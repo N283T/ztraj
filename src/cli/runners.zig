@@ -1107,3 +1107,158 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
     }
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommands: phi, psi, omega, chi (protein-specific dihedrals)
+// ============================================================================
+
+const prot_dih = geometry.protein_dihedrals;
+
+fn runProteinDihedral(
+    allocator: std.mem.Allocator,
+    args: Args,
+    comptime key: []const u8,
+    computeFn: anytype,
+) !void {
+    const top_path = args.top_path orelse args.traj_path;
+    var parsed = try loader.loadTopology(allocator, top_path);
+    defer parsed.deinit();
+
+    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    defer {
+        for (frames) |*f| @constCast(f).deinit();
+        allocator.free(frames);
+    }
+    if (frames.len == 0) return error.NoFrames;
+
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    // Compute for each frame
+    switch (args.format) {
+        .json => {
+            try w.writeAll("{\n  \"" ++ key ++ "\": [\n");
+            for (frames, 0..) |frame, fi| {
+                const vals = try computeFn(allocator, parsed.topology, frame);
+                defer allocator.free(vals);
+                if (fi > 0) try w.writeAll(",\n");
+                try w.writeAll("    [");
+                for (vals, 0..) |v, i| {
+                    if (i > 0) try w.writeAll(", ");
+                    if (v) |angle| {
+                        try w.print("{d:.6}", .{angle});
+                    } else {
+                        try w.writeAll("null");
+                    }
+                }
+                try w.writeByte(']');
+            }
+            try w.writeAll("\n  ]\n}\n");
+        },
+        .csv, .tsv => {
+            const delim: u8 = if (args.format == .csv) ',' else '\t';
+            // Header: frame, res_0, res_1, ...
+            try w.writeAll("frame");
+            for (0..parsed.topology.residues.len) |ri| {
+                try w.print("{c}res_{d}", .{ delim, ri });
+            }
+            try w.writeByte('\n');
+            for (frames, 0..) |frame, fi| {
+                const vals = try computeFn(allocator, parsed.topology, frame);
+                defer allocator.free(vals);
+                try w.print("{d}", .{fi});
+                for (vals) |v| {
+                    try w.writeByte(delim);
+                    if (v) |angle| {
+                        try w.print("{d:.6}", .{angle});
+                    }
+                }
+                try w.writeByte('\n');
+            }
+        },
+    }
+    try flushOutput(buf.items, args.output_path);
+}
+
+pub fn runPhi(allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(allocator, args, "phi", prot_dih.computePhi);
+}
+
+pub fn runPsi(allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(allocator, args, "psi", prot_dih.computePsi);
+}
+
+pub fn runOmega(allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(allocator, args, "omega", prot_dih.computeOmega);
+}
+
+pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
+    // chi level could be a CLI arg, default to 1 for now
+    const top_path = args.top_path orelse args.traj_path;
+    var parsed = try loader.loadTopology(allocator, top_path);
+    defer parsed.deinit();
+
+    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    defer {
+        for (frames) |*f| @constCast(f).deinit();
+        allocator.free(frames);
+    }
+    if (frames.len == 0) return error.NoFrames;
+
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    // Output chi1-chi4 for each frame
+    switch (args.format) {
+        .json => {
+            try w.writeAll("{\n");
+            const chi_names = [_][]const u8{ "chi1", "chi2", "chi3", "chi4" };
+            for (chi_names, 0..) |chi_name, ci| {
+                const level: u8 = @intCast(ci + 1);
+                if (ci > 0) try w.writeAll(",\n");
+                try w.print("  \"{s}\": [\n", .{chi_name});
+                for (frames, 0..) |frame, fi| {
+                    const vals = prot_dih.computeChi(allocator, parsed.topology, frame, level) catch break;
+                    defer allocator.free(vals);
+                    if (fi > 0) try w.writeAll(",\n");
+                    try w.writeAll("    [");
+                    for (vals, 0..) |v, i| {
+                        if (i > 0) try w.writeAll(", ");
+                        if (v) |angle| {
+                            try w.print("{d:.6}", .{angle});
+                        } else {
+                            try w.writeAll("null");
+                        }
+                    }
+                    try w.writeByte(']');
+                }
+                try w.writeAll("\n  ]");
+            }
+            try w.writeAll("\n}\n");
+        },
+        .csv, .tsv => {
+            // For CSV, just output chi1
+            const delim: u8 = if (args.format == .csv) ',' else '\t';
+            try w.writeAll("frame");
+            for (0..parsed.topology.residues.len) |ri| {
+                try w.print("{c}res_{d}", .{ delim, ri });
+            }
+            try w.writeByte('\n');
+            for (frames, 0..) |frame, fi| {
+                const vals = prot_dih.computeChi(allocator, parsed.topology, frame, 1) catch break;
+                defer allocator.free(vals);
+                try w.print("{d}", .{fi});
+                for (vals) |v| {
+                    try w.writeByte(delim);
+                    if (v) |angle| {
+                        try w.print("{d:.6}", .{angle});
+                    }
+                }
+                try w.writeByte('\n');
+            }
+        },
+    }
+    try flushOutput(buf.items, args.output_path);
+}

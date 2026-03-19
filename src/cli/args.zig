@@ -23,6 +23,10 @@ pub const Subcommand = enum {
     sasa,
     all,
     dssp,
+    phi,
+    psi,
+    omega,
+    chi,
 };
 
 // ============================================================================
@@ -90,6 +94,10 @@ pub fn printUsage(prog: []const u8) void {
         \\  sasa        Solvent accessible surface area (Shrake-Rupley)
         \\  all         Combined analysis (RMSD, RMSF, Rg, SASA, COM, hbonds, contacts)
         \\  dssp        Secondary structure assignment (DSSP algorithm)
+        \\  phi         Backbone phi dihedral angles per residue
+        \\  psi         Backbone psi dihedral angles per residue
+        \\  omega       Backbone omega dihedral angles per residue
+        \\  chi         Side-chain chi dihedral angles per residue
         \\
         \\Common options:
         \\  --top <file>           Topology file (PDB or mmCIF); required unless traj is PDB/CIF
@@ -152,6 +160,10 @@ pub fn parseArgs(raw: []const []const u8) ParseArgsError!Args {
         if (std.mem.eql(u8, sub_str, "sasa")) break :blk .sasa;
         if (std.mem.eql(u8, sub_str, "all")) break :blk .all;
         if (std.mem.eql(u8, sub_str, "dssp")) break :blk .dssp;
+        if (std.mem.eql(u8, sub_str, "phi")) break :blk .phi;
+        if (std.mem.eql(u8, sub_str, "psi")) break :blk .psi;
+        if (std.mem.eql(u8, sub_str, "omega")) break :blk .omega;
+        if (std.mem.eql(u8, sub_str, "chi")) break :blk .chi;
         return ParseArgsError.UnknownSubcommand;
     };
 
