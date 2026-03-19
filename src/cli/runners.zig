@@ -932,8 +932,12 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     for (frames, 0..) |frame, fi| {
         // RMSD
         rmsd_vals[fi] = geometry.rmsd.compute(
-            ref.x, ref.y, ref.z,
-            frame.x, frame.y, frame.z,
+            ref.x,
+            ref.y,
+            ref.z,
+            frame.x,
+            frame.y,
+            frame.z,
             atom_indices,
         );
 
