@@ -3,6 +3,7 @@
 from pyztraj.core import (
     Contact,
     HBond,
+    analyze_all,
     SasaResult,
     Structure,
     XtcReader,
@@ -29,6 +30,7 @@ from pyztraj.core import (
 __all__ = [
     "Contact",
     "HBond",
+    "analyze_all",
     "SasaResult",
     "Structure",
     "XtcReader",

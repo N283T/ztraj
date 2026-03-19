@@ -21,6 +21,7 @@ pub const Subcommand = enum {
     contacts,
     rdf,
     sasa,
+    all,
 };
 
 // ============================================================================
@@ -86,6 +87,7 @@ pub fn printUsage(prog: []const u8) void {
         \\  contacts    Residue-residue contacts per frame
         \\  rdf         Radial distribution function g(r)
         \\  sasa        Solvent accessible surface area (Shrake-Rupley)
+        \\  all         Combined analysis (RMSD, RMSF, Rg, SASA, COM, hbonds, contacts)
         \\
         \\Common options:
         \\  --top <file>           Topology file (PDB or mmCIF); required unless traj is PDB/CIF
@@ -146,6 +148,7 @@ pub fn parseArgs(raw: []const []const u8) ParseArgsError!Args {
         if (std.mem.eql(u8, sub_str, "contacts")) break :blk .contacts;
         if (std.mem.eql(u8, sub_str, "rdf")) break :blk .rdf;
         if (std.mem.eql(u8, sub_str, "sasa")) break :blk .sasa;
+        if (std.mem.eql(u8, sub_str, "all")) break :blk .all;
         return ParseArgsError.UnknownSubcommand;
     };
 

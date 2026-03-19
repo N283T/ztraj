@@ -63,6 +63,7 @@ pub fn main() !void {
         .contacts => runners.runContacts(allocator, args),
         .rdf => runners.runRdf(allocator, args),
         .sasa => runners.runSasa(allocator, args),
+        .all => runners.runAll(allocator, args),
     };
 
     result catch |err| {

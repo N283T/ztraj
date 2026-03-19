@@ -277,6 +277,36 @@ class TestContacts:
             pyztraj.compute_contacts(struct, struct.coords, scheme="invalid")
 
 
+class TestAnalyzeAll:
+    def test_single_frame(self, pdb_path: Path):
+        struct = pyztraj.load_pdb(pdb_path)
+        result = pyztraj.analyze_all(struct, [struct.coords])
+        assert result["n_frames"] == 1
+        assert result["n_atoms"] == struct.n_atoms
+        assert result["rmsd"].shape == (1,)
+        assert result["rmsd"][0] == pytest.approx(0.0, abs=1e-6)  # self vs self
+        assert result["rg"].shape == (1,)
+        assert result["rg"][0] > 0
+        assert result["sasa"].shape == (1,)
+        assert result["sasa"][0] > 0
+        assert result["center_of_mass"].shape == (1, 3)
+        assert result["rmsf"].shape == (struct.n_atoms,)
+        assert result["n_hbonds"].shape == (1,)
+        assert result["n_contacts"].shape == (1,)
+        expected_keys = {
+            "n_frames",
+            "n_atoms",
+            "rmsd",
+            "rmsf",
+            "rg",
+            "sasa",
+            "center_of_mass",
+            "n_hbonds",
+            "n_contacts",
+        }
+        assert set(result.keys()) == expected_keys
+
+
 class TestSASA:
     def test_compute_from_pdb(self, pdb_path: Path):
         struct = pyztraj.load_pdb(pdb_path)

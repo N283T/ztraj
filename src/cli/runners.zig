@@ -870,3 +870,132 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
     try writeScalarSeriesBuf(allocator, &buf, args.format, "sasa", sasa_vals);
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommand: all (combined analysis)
+// ============================================================================
+
+pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
+    const top_path = args.top_path orelse args.traj_path;
+    var parsed = try loader.loadTopology(allocator, top_path);
+    defer parsed.deinit();
+
+    const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
+    defer if (atom_indices) |ai| allocator.free(ai);
+
+    const masses = try parsed.topology.masses(allocator);
+    defer allocator.free(masses);
+
+    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    defer {
+        for (frames) |*f| @constCast(f).deinit();
+        allocator.free(frames);
+    }
+
+    const n_frames = frames.len;
+    if (n_frames == 0) return error.NoFrames;
+
+    // Pre-allocate result arrays
+    const rmsd_vals = try allocator.alloc(f64, n_frames);
+    defer allocator.free(rmsd_vals);
+    const rg_vals = try allocator.alloc(f64, n_frames);
+    defer allocator.free(rg_vals);
+    const sasa_vals = try allocator.alloc(f64, n_frames);
+    defer allocator.free(sasa_vals);
+    const com_x = try allocator.alloc(f64, n_frames);
+    defer allocator.free(com_x);
+    const com_y = try allocator.alloc(f64, n_frames);
+    defer allocator.free(com_y);
+    const com_z = try allocator.alloc(f64, n_frames);
+    defer allocator.free(com_z);
+    const n_hbonds = try allocator.alloc(f64, n_frames);
+    defer allocator.free(n_hbonds);
+    const n_contacts = try allocator.alloc(f64, n_frames);
+    defer allocator.free(n_contacts);
+
+    // Reference frame for RMSD
+    const ref = frames[0];
+
+    // Per-frame analysis
+    const hbonds_cfg = analysis.hbonds.Config{};
+    const contacts_scheme: analysis.contacts.Scheme = .closest_heavy;
+    const contacts_cutoff: f32 = 4.5;
+
+    for (frames, 0..) |frame, fi| {
+        // RMSD
+        rmsd_vals[fi] = geometry.rmsd.compute(
+            ref.x, ref.y, ref.z,
+            frame.x, frame.y, frame.z,
+            atom_indices,
+        );
+
+        // Rg
+        rg_vals[fi] = geometry.rg.compute(frame.x, frame.y, frame.z, masses, atom_indices);
+
+        // Center of mass
+        const com = geometry.center.ofMass(frame.x, frame.y, frame.z, masses, atom_indices);
+        com_x[fi] = com[0];
+        com_y[fi] = com[1];
+        com_z[fi] = com[2];
+
+        // SASA
+        var sasa_result = try analysis.sasa.compute(
+            allocator,
+            frame.x,
+            frame.y,
+            frame.z,
+            parsed.topology,
+            atom_indices,
+            .{ .n_points = 100, .probe_radius = 1.4, .n_threads = 0 },
+        );
+        defer sasa_result.deinit();
+        sasa_vals[fi] = sasa_result.total_area;
+
+        // Hbonds count
+        const hbonds = try analysis.hbonds.detect(allocator, parsed.topology, frame, hbonds_cfg);
+        defer allocator.free(hbonds);
+        n_hbonds[fi] = @floatFromInt(hbonds.len);
+
+        // Contacts count
+        const contacts = try analysis.contacts.compute(allocator, parsed.topology, frame, contacts_scheme, contacts_cutoff);
+        defer allocator.free(contacts);
+        n_contacts[fi] = @floatFromInt(contacts.len);
+    }
+
+    // RMSF (across all frames)
+    const rmsf_vals = try geometry.rmsf.compute(allocator, frames, atom_indices);
+    defer allocator.free(rmsf_vals);
+
+    // Write JSON output
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    const n_atoms = if (atom_indices) |ai| ai.len else parsed.topology.atoms.len;
+
+    try w.print("{{\n  \"n_frames\": {d},\n  \"n_atoms\": {d},\n", .{ n_frames, n_atoms });
+
+    // Scalar series
+    const series_keys = [_][]const u8{ "rmsd", "rg", "sasa", "n_hbonds", "n_contacts" };
+    const series_vals = [_][]const f64{ rmsd_vals, rg_vals, sasa_vals, n_hbonds, n_contacts };
+    for (series_keys, series_vals) |key, vals| {
+        try w.writeAll("  ");
+        try output.writeJsonArray(w, key, vals);
+        try w.writeAll(",\n");
+    }
+
+    // RMSF
+    try w.writeAll("  ");
+    try output.writeJsonArray(w, "rmsf", rmsf_vals);
+    try w.writeAll(",\n");
+
+    // Center of mass as array of [x, y, z]
+    try w.writeAll("  \"center_of_mass\": [");
+    for (0..n_frames) |fi| {
+        if (fi > 0) try w.writeAll(", ");
+        try w.print("[{d:.6}, {d:.6}, {d:.6}]", .{ com_x[fi], com_y[fi], com_z[fi] });
+    }
+    try w.writeAll("]\n}\n");
+
+    try flushOutput(buf.items, args.output_path);
+}
