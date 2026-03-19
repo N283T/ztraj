@@ -34,6 +34,7 @@ pub const io = struct {
     pub const mmcif = @import("io/mmcif.zig");
     pub const cif_tokenizer = @import("io/cif_tokenizer.zig");
     pub const xtc = @import("io/xtc.zig");
+    pub const trr = @import("io/trr.zig");
     pub const dcd = @import("io/dcd.zig");
 };
 

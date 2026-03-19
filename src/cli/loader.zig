@@ -35,6 +35,10 @@ pub fn isDcd(path: []const u8) bool {
     return endsWithCI(path, ".dcd");
 }
 
+pub fn isTrr(path: []const u8) bool {
+    return endsWithCI(path, ".trr");
+}
+
 // ============================================================================
 // Topology loading
 // ============================================================================
@@ -101,6 +105,19 @@ pub fn loadAllFrames(
             copy.box_vectors = frame_ptr.box_vectors;
             try frames.append(allocator, copy);
         }
+    } else if (isTrr(traj_path)) {
+        var reader = try io.trr.TrrReader.open(allocator, traj_path);
+        defer reader.deinit();
+        while (try reader.next()) |frame_ptr| {
+            var copy = try types.Frame.init(allocator, n_atoms);
+            @memcpy(copy.x, frame_ptr.x);
+            @memcpy(copy.y, frame_ptr.y);
+            @memcpy(copy.z, frame_ptr.z);
+            copy.time = frame_ptr.time;
+            copy.step = frame_ptr.step;
+            copy.box_vectors = frame_ptr.box_vectors;
+            try frames.append(allocator, copy);
+        }
     } else {
         // Single-frame structure file — parse only for its coordinates.
         const data = try std.fs.cwd().readFileAlloc(allocator, traj_path, 512 * 1024 * 1024);
@@ -111,7 +128,7 @@ pub fn loadAllFrames(
             try io.mmcif.parse(allocator, data)
         else {
             std.debug.print(
-                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .dcd, .pdb, .cif, .mmcif)\n",
+                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif)\n",
                 .{traj_path},
             );
             std.process.exit(1);
