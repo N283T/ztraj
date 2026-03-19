@@ -21,6 +21,7 @@ pub const geometry = struct {
     pub const rmsf = @import("geometry/rmsf.zig");
     pub const protein_dihedrals = @import("geometry/protein_dihedrals.zig");
     pub const superpose = @import("geometry/superpose.zig");
+    pub const pbc = @import("geometry/pbc.zig");
 };
 
 pub const analysis = struct {

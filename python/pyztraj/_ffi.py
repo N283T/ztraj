@@ -106,6 +106,16 @@ _CDEF = """
                                CContact* contacts_out, size_t capacity,
                                size_t* n_found);
 
+    // PBC
+    int ztraj_wrap_coords(float* x, float* y, float* z,
+                          size_t n_atoms, const float* box);
+    int ztraj_minimum_image_distance(float x1, float y1, float z1,
+                                     float x2, float y2, float z2,
+                                     const float* box, float* result);
+    int ztraj_make_molecules_whole(void* structure_handle,
+                                   float* x, float* y, float* z,
+                                   size_t n_atoms, const float* box);
+
     // Analysis: SASA
     int ztraj_compute_sasa(void* structure_handle,
                            const float* x, const float* y, const float* z,

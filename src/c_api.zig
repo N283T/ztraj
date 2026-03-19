@@ -21,6 +21,7 @@ const hbonds_mod = @import("analysis/hbonds.zig");
 const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
 const sasa_mod = @import("analysis/sasa.zig");
+const pbc_mod = @import("geometry/pbc.zig");
 
 // =============================================================================
 // Error Codes
@@ -991,6 +992,84 @@ export fn ztraj_compute_sasa(
     total_area.* = result.total_area;
     @memcpy(atom_areas[0..n_atoms], result.atom_areas);
 
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// PBC (Periodic Boundary Conditions)
+// =============================================================================
+
+/// Parse box from flat 9-element f32 array to [3][3]f32.
+fn parseBox(box_ptr: [*]const f32) [3][3]f32 {
+    var b: [3][3]f32 = undefined;
+    for (0..3) |i| {
+        for (0..3) |j| {
+            b[i][j] = box_ptr[i * 3 + j];
+        }
+    }
+    return b;
+}
+
+fn mapPbcError(err: pbc_mod.PbcError) c_int {
+    return switch (err) {
+        pbc_mod.PbcError.InvalidBox, pbc_mod.PbcError.InvalidBondIndex => ZTRAJ_ERROR_INVALID_INPUT,
+        pbc_mod.PbcError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+    };
+}
+
+/// Wrap coordinates into primary simulation box (in-place).
+/// `box` must point to 9 f32 values (row-major 3x3). Diagonals must be positive.
+export fn ztraj_wrap_coords(
+    x: [*]f32,
+    y: [*]f32,
+    z: [*]f32,
+    n_atoms: usize,
+    box: [*]const f32,
+) callconv(.c) c_int {
+    if (n_atoms == 0) return ZTRAJ_OK;
+    const b = parseBox(box);
+    pbc_mod.wrapCoords(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms], b) catch |err| {
+        return mapPbcError(err);
+    };
+    return ZTRAJ_OK;
+}
+
+/// Compute minimum image distance between two atoms under PBC.
+export fn ztraj_minimum_image_distance(
+    x1: f32,
+    y1: f32,
+    z1: f32,
+    x2: f32,
+    y2: f32,
+    z2: f32,
+    box: [*]const f32,
+    result: *f32,
+) callconv(.c) c_int {
+    const b = parseBox(box);
+    result.* = pbc_mod.minimumImageDistance(x1, y1, z1, x2, y2, z2, b) catch |err| {
+        return mapPbcError(err);
+    };
+    return ZTRAJ_OK;
+}
+
+/// Make molecules whole across box boundaries (in-place).
+/// Requires topology with bond information. Box diagonals must be positive.
+export fn ztraj_make_molecules_whole(
+    structure_handle: ?*anyopaque,
+    x: [*]f32,
+    y: [*]f32,
+    z: [*]f32,
+    n_atoms: usize,
+    box: [*]const f32,
+) callconv(.c) c_int {
+    const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms == 0) return ZTRAJ_OK;
+    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const b = parseBox(box);
+    pbc_mod.makeMoleculesWhole(c_allocator, x[0..n_atoms], y[0..n_atoms], z[0..n_atoms], h.parse_result.topology, b) catch |err| {
+        return mapPbcError(err);
+    };
     return ZTRAJ_OK;
 }
 
