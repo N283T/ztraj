@@ -2,7 +2,7 @@
 
 from pyztraj._ffi import get_ffi, get_lib
 from pyztraj._helpers import ZtrajError
-from pyztraj.all import analyze_all
+from pyztraj.combined import analyze_all
 from pyztraj.analysis import (
     Contact,
     HBond,
