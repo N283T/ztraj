@@ -1,25 +1,30 @@
+// Helix detection for native DSSP.
+//
+// Operates entirely on DsspResidue flags and H-bond records; no Frame
+// coordinates are needed here.
+
 const std = @import("std");
-const math = std.math;
 const types = @import("types.zig");
-const residue_mod = @import("residue.zig");
+const backbone = @import("backbone.zig");
 const hbond_mod = @import("hbond.zig");
 
-const Residue = residue_mod.Residue;
+const DsspResidue = types.DsspResidue;
 const HelixType = types.HelixType;
 const HelixPositionType = types.HelixPositionType;
 const StructureType = types.StructureType;
 
-// ---------------------------------------------------------------------------
-// Alpha, 3/10, and Pi helix detection (dssp.cpp:1133-1248)
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Alpha, 3/10, and Pi helix detection
+// ============================================================================
 
-/// Calculate alpha, 3/10, and pi helices.
+/// Mark and assign alpha, 3/10, and pi helices.
 ///
 /// For each helix type (stride 3, 4, 5):
-/// 1. Mark helix start/end/middle based on H-bond from i+stride to i
-/// 2. Assign secondary structure with priority:
-///    sheets > alpha helix > 3/10 helix > pi helix > turn > bend
-pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void {
+///   1. Check H-bond from i+stride to i; mark start/end/middle flags.
+///   2. Set bend flags (kappa > 70°).
+///   3. Assign secondary structure in priority order:
+///      sheets > alpha > 3/10 > pi > turn > bend.
+pub fn calculateAlphaHelices(residues: []DsspResidue, prefer_pi_helices: bool) void {
     const n = residues.len;
     if (n < 4) return;
 
@@ -31,8 +36,7 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
         for (0..n) |i| {
             if (i + stride >= n) break;
 
-            // Check chain continuity and H-bond from i+stride back to i
-            if (!residue_mod.noChainBreak(residues, @intCast(i), @intCast(i + stride))) continue;
+            if (!backbone.noChainBreak(residues, @intCast(i), @intCast(i + stride))) continue;
             if (!hbond_mod.testBond(residues, @intCast(i + stride), @intCast(i))) continue;
 
             // Mark end position
@@ -60,7 +64,7 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
         }
     }
 
-    // Step 1b: Set bend flags (C++ dssp.cpp:1162-1166 - after helix flags, before SS assignment)
+    // Step 1b: Set bend flags from kappa angle
     for (residues) |*res| {
         if (res.kappa) |k| {
             res.bend = k > 70.0;
@@ -68,10 +72,9 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
     }
 
     // Step 2: Assign alpha helices (need 2 consecutive starts → 4 residues)
-    // dssp.cpp:1168: for (uint32_t i = 1; i + 4 < inResidues.size(); ++i)
     if (n >= 5) {
         for (1..n) |i| {
-            if (i + 4 >= n) break; // Match dssp.cpp boundary
+            if (i + 4 >= n) break;
             if (residues[i].isHelixStart(.alpha) and residues[i - 1].isHelixStart(.alpha)) {
                 for (i..i + 4) |j| {
                     residues[j].secondary_structure = .alpha_helix;
@@ -80,11 +83,10 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
         }
     }
 
-    // Step 3: Assign 3/10 helices (only if not already assigned to sheets or alpha)
-    // dssp.cpp:1177: for (uint32_t i = 1; i + 3 < inResidues.size(); ++i)
+    // Step 3: Assign 3/10 helices (only if not already sheets or alpha)
     if (n >= 4) {
         for (1..n) |i| {
-            if (i + 3 >= n) break; // Match dssp.cpp boundary
+            if (i + 3 >= n) break;
             if (residues[i].isHelixStart(.helix_3_10) and residues[i - 1].isHelixStart(.helix_3_10)) {
                 var can_assign = true;
                 for (i..i + 3) |j| {
@@ -103,21 +105,16 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
         }
     }
 
-    // Step 4: Assign pi helices (only if not already assigned, unless prefer_pi)
-    // dssp.cpp:1191: for (uint32_t i = 1; i + 5 < inResidues.size(); ++i)
+    // Step 4: Assign pi helices
     if (n >= 6) {
         for (1..n) |i| {
-            if (i + 5 >= n) break; // Match dssp.cpp boundary
+            if (i + 5 >= n) break;
             if (residues[i].isHelixStart(.pi) and residues[i - 1].isHelixStart(.pi)) {
                 var can_assign = true;
                 for (i..i + 5) |j| {
                     const ss = residues[j].secondary_structure;
-                    if (ss == .loop or ss == .helix_5) {
-                        continue;
-                    }
-                    if (prefer_pi_helices and ss == .alpha_helix) {
-                        continue;
-                    }
+                    if (ss == .loop or ss == .helix_5) continue;
+                    if (prefer_pi_helices and ss == .alpha_helix) continue;
                     can_assign = false;
                     break;
                 }
@@ -130,7 +127,7 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
         }
     }
 
-    // Step 5: Assign turns and bends (dssp.cpp:1208-1224)
+    // Step 5: Assign turns and bends
     for (1..n) |i| {
         if (i + 1 >= n) break;
         if (residues[i].secondary_structure != .loop) continue;
@@ -155,15 +152,15 @@ pub fn calculateAlphaHelices(residues: []Residue, prefer_pi_helices: bool) void 
     }
 }
 
-// ---------------------------------------------------------------------------
-// PP-II helix detection (dssp.cpp:1252-1385)
-// ---------------------------------------------------------------------------
+// ============================================================================
+// PP-II helix detection
+// ============================================================================
 
-/// Calculate polyproline II helices based on phi/psi angles.
+/// Assign polyproline II helices based on phi/psi angle criteria.
 ///
 /// PP-II region: phi = -75° ± 29°, psi = 145° ± 29°
-/// Minimum stretch: 2 or 3 consecutive residues (configurable).
-pub fn calculatePPHelices(residues: []Residue, stretch_length: u32) void {
+/// Minimum stretch: stretch_length consecutive residues.
+pub fn calculatePPHelices(residues: []DsspResidue, stretch_length: u32) void {
     const n = residues.len;
     if (n < 3) return;
 
@@ -181,20 +178,15 @@ pub fn calculatePPHelices(residues: []Residue, stretch_length: u32) void {
             const idx = i + k;
             const phi = residues[idx].phi orelse 360.0;
             const psi = residues[idx].psi orelse 360.0;
-
             if (phi < phi_min or phi > phi_max or psi < psi_min or psi > psi_max) {
                 all_in_region = false;
                 break;
             }
         }
-
         if (!all_in_region) continue;
 
-        // Assign PP-II helix flags and structure type
         for (0..stretch_length) |k| {
             const idx = i + k;
-
-            // Set helix flag
             if (k == 0) {
                 const flag = residues[idx].getHelixFlag(.pp);
                 if (flag == .end) {
@@ -215,7 +207,6 @@ pub fn calculatePPHelices(residues: []Residue, stretch_length: u32) void {
                 }
             }
 
-            // Only assign to loop residues
             if (residues[idx].secondary_structure == .loop) {
                 residues[idx].secondary_structure = .helix_pp2;
             }
@@ -223,50 +214,87 @@ pub fn calculatePPHelices(residues: []Residue, stretch_length: u32) void {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Tests
-// ---------------------------------------------------------------------------
+// ============================================================================
 
-test "calculateAlphaHelices - marks turns for loop residues near helix starts" {
-    // Create a small chain with helix flags pre-set
-    var residues: [6]Residue = undefined;
+test "calculateAlphaHelices - assigns alpha helix for consecutive starts" {
+    var residues: [6]DsspResidue = undefined;
     for (&residues, 0..) |*r, idx| {
-        r.* = Residue{
+        r.* = DsspResidue{
             .number = @intCast(idx),
             .complete = true,
             .secondary_structure = .loop,
         };
     }
 
-    // Pre-set helix starts for alpha helix at positions 0, 1
+    // Pre-set helix starts for positions 0 and 1
     residues[0].setHelixFlag(.alpha, .start);
     residues[1].setHelixFlag(.alpha, .start);
 
-    // Manually set up H-bond records so testBond works
-    // For alpha helix: bond from i+4 to i
+    // Bond from i+4 to i
     residues[4].hbond_acceptor[0] = .{ .residue_index = 0, .energy = -2.0 };
     residues[5].hbond_acceptor[0] = .{ .residue_index = 1, .energy = -2.0 };
 
     calculateAlphaHelices(&residues, false);
 
-    // Residues 1-4 should be alpha helix
     try std.testing.expectEqual(StructureType.alpha_helix, residues[1].secondary_structure);
     try std.testing.expectEqual(StructureType.alpha_helix, residues[2].secondary_structure);
     try std.testing.expectEqual(StructureType.alpha_helix, residues[3].secondary_structure);
     try std.testing.expectEqual(StructureType.alpha_helix, residues[4].secondary_structure);
 }
 
-test "calculatePPHelices - assigns PP-II to qualifying residues" {
-    var residues: [5]Residue = undefined;
+test "calculateAlphaHelices - turn assignment" {
+    var residues: [5]DsspResidue = undefined;
     for (&residues, 0..) |*r, idx| {
-        r.* = Residue{
+        r.* = DsspResidue{
             .number = @intCast(idx),
             .complete = true,
             .secondary_structure = .loop,
         };
     }
 
-    // Set phi/psi in PP-II region for residues 1 and 2
+    // Mark residue 0 as helix start for alpha (stride 4)
+    residues[0].setHelixFlag(.alpha, .start);
+    // residue 4 would be end (i + stride = 0 + 4)
+    residues[4].hbond_acceptor[0] = .{ .residue_index = 0, .energy = -2.0 };
+
+    calculateAlphaHelices(&residues, false);
+
+    // With only one helix start at 0 (not consecutive), no alpha assigned
+    // Residues 1..4 may get turn if they are within a helix start window
+    // Residue 1 is 1 step after helix start at 0, so it becomes turn
+    try std.testing.expectEqual(StructureType.turn, residues[1].secondary_structure);
+}
+
+test "calculateAlphaHelices - bend from kappa" {
+    var residues: [4]DsspResidue = undefined;
+    for (&residues, 0..) |*r, idx| {
+        r.* = DsspResidue{
+            .number = @intCast(idx),
+            .complete = true,
+            .secondary_structure = .loop,
+        };
+    }
+    residues[2].kappa = 80.0; // > 70 → bend
+
+    calculateAlphaHelices(&residues, false);
+
+    try std.testing.expect(residues[2].bend);
+    // Residue 2 has bend=true and is loop, but step 5 requires i+1 < n
+    // and checks i (not directly residue 2)... let's just verify bend flag set
+}
+
+test "calculatePPHelices - assigns PP-II" {
+    var residues: [5]DsspResidue = undefined;
+    for (&residues, 0..) |*r, idx| {
+        r.* = DsspResidue{
+            .number = @intCast(idx),
+            .complete = true,
+            .secondary_structure = .loop,
+        };
+    }
+
     residues[1].phi = -75.0;
     residues[1].psi = 145.0;
     residues[2].phi = -70.0;
@@ -276,34 +304,28 @@ test "calculatePPHelices - assigns PP-II to qualifying residues" {
 
     try std.testing.expectEqual(StructureType.helix_pp2, residues[1].secondary_structure);
     try std.testing.expectEqual(StructureType.helix_pp2, residues[2].secondary_structure);
-    // Others should remain loop
     try std.testing.expectEqual(StructureType.loop, residues[0].secondary_structure);
     try std.testing.expectEqual(StructureType.loop, residues[3].secondary_structure);
 }
 
 test "calculatePPHelices - does not overwrite non-loop" {
-    var residues: [5]Residue = undefined;
+    var residues: [5]DsspResidue = undefined;
     for (&residues, 0..) |*r, idx| {
-        r.* = Residue{
+        r.* = DsspResidue{
             .number = @intCast(idx),
             .complete = true,
             .secondary_structure = .loop,
         };
     }
 
-    // Set phi/psi in PP-II region
     residues[1].phi = -75.0;
     residues[1].psi = 145.0;
     residues[2].phi = -70.0;
     residues[2].psi = 150.0;
-
-    // But residue 1 is already alpha helix
     residues[1].secondary_structure = .alpha_helix;
 
     calculatePPHelices(&residues, 2);
 
-    // Should not overwrite alpha helix
     try std.testing.expectEqual(StructureType.alpha_helix, residues[1].secondary_structure);
-    // Residue 2 should still get PP-II
     try std.testing.expectEqual(StructureType.helix_pp2, residues[2].secondary_structure);
 }
