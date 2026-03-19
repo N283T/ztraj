@@ -16,7 +16,15 @@ pub fn computeCovarianceMatrix(
     const n_frames = frames.len;
     if (n_frames < 2) return error.TooFewFrames;
 
-    const n_sel: usize = if (atom_indices) |idx| idx.len else frames[0].nAtoms();
+    const frame_n = frames[0].nAtoms();
+    // Validate atom indices
+    if (atom_indices) |indices| {
+        for (indices) |idx| {
+            if (idx >= frame_n) return error.IndexOutOfBounds;
+        }
+    }
+
+    const n_sel: usize = if (atom_indices) |idx| idx.len else frame_n;
     const dim = n_sel * 3;
     const n_f: f64 = @floatFromInt(n_frames);
 

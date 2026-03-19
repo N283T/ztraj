@@ -1083,7 +1083,7 @@ export fn ztraj_msd(
 
     const msd_result = msd_mod.compute(c_allocator, frames, indices) catch |err| {
         return switch (err) {
-            error.NoFrames => ZTRAJ_ERROR_INVALID_INPUT,
+            error.NoFrames, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
             error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
     };
@@ -1130,7 +1130,7 @@ export fn ztraj_pca_covariance(
 
     const cov = pca_mod.computeCovarianceMatrix(c_allocator, frames, indices) catch |err| {
         return switch (err) {
-            error.TooFewFrames => ZTRAJ_ERROR_INVALID_INPUT,
+            error.TooFewFrames, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
             error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
     };

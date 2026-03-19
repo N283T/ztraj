@@ -19,17 +19,25 @@ pub fn compute(
     const n_frames = frames.len;
     if (n_frames == 0) return error.NoFrames;
 
+    const frame_n = frames[0].nAtoms();
+    // Validate atom indices
+    if (atom_indices) |indices| {
+        for (indices) |idx| {
+            if (idx >= frame_n) return error.IndexOutOfBounds;
+        }
+    }
+
     const msd = try allocator.alloc(f64, n_frames);
     @memset(msd, 0.0);
 
-    const n_atoms: usize = if (atom_indices) |idx| idx.len else frames[0].nAtoms();
+    const n_atoms: usize = if (atom_indices) |idx| idx.len else frame_n;
     if (n_atoms == 0) return msd;
 
     const n_atoms_f: f64 = @floatFromInt(n_atoms);
 
     for (0..n_frames) |tau| {
         var sum: f64 = 0.0;
-        var count: u32 = 0;
+        var count: usize = 0;
 
         for (0..n_frames - tau) |t| {
             const frame_t = frames[t];
@@ -43,7 +51,7 @@ pub fn compute(
                     sum += dx * dx + dy * dy + dz * dz;
                 }
             } else {
-                for (0..frames[0].nAtoms()) |idx| {
+                for (0..frame_n) |idx| {
                     const dx: f64 = @as(f64, frame_tau.x[idx]) - @as(f64, frame_t.x[idx]);
                     const dy: f64 = @as(f64, frame_tau.y[idx]) - @as(f64, frame_t.y[idx]);
                     const dz: f64 = @as(f64, frame_tau.z[idx]) - @as(f64, frame_t.z[idx]);
