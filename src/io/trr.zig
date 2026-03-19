@@ -20,7 +20,6 @@ pub const TrrReadError = error{
     EndOfFile,
     ReadError,
     OutOfMemory,
-    NoCoordinates,
 };
 
 /// Streaming TRR reader that yields one Frame at a time.
