@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0] - 2026-03-19
+
+### Added
+- SASA computation via zsasa dependency (Shrake-Rupley algorithm, element-based VdW radii)
+- `all` command: combined analysis (RMSD, RMSF, Rg, SASA, COM, hbonds, contacts) in one pass
+- Python `analyze_all()` convenience function for batch trajectory analysis
+- `compute_sasa()` Python API with per-atom and total SASA
+
+### Changed
+- Split monolithic `core.py` (1080 lines) into focused modules:
+  `_helpers.py`, `io.py`, `geometry.py`, `analysis.py`, `combined.py`
+- External Python API unchanged (all re-exported from `__init__.py`)
+
+### Fixed
+- PyPI publish action: use tag instead of SHA for Docker-based action
+
 ## [0.1.0] - 2026-03-18
 
 ### Added
