@@ -116,6 +116,14 @@ _CDEF = """
                                    float* x, float* y, float* z,
                                    size_t n_atoms, const float* box);
 
+    // Analysis: Native contacts
+    int ztraj_native_contacts_q(const float* ref_x, const float* ref_y, const float* ref_z,
+                                const float* x, const float* y, const float* z,
+                                size_t n_atoms,
+                                const uint32_t* indices_a, size_t n_a,
+                                const uint32_t* indices_b, size_t n_b,
+                                float cutoff, double* result);
+
     // Analysis: SASA
     int ztraj_compute_sasa(void* structure_handle,
                            const float* x, const float* y, const float* z,

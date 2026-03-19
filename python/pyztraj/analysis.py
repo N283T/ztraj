@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pyztraj._ffi import get_ffi, get_lib
-from pyztraj._helpers import _check, _ptr_f32, _ptr_f64, _to_soa
+from pyztraj._helpers import _as_u32, _check, _ptr_f32, _ptr_f64, _ptr_u32, _to_soa
 from pyztraj.io import Structure
 
 if TYPE_CHECKING:
@@ -338,3 +338,59 @@ def compute_sasa(
         return SasaResult(total_area=float(total_area[0]), atom_areas=atom_areas)
     finally:
         lib.ztraj_free_structure(handle)
+
+
+def compute_native_contacts_q(
+    ref_coords: NDArray[np.float32],
+    coords: NDArray[np.float32],
+    indices_a: NDArray[np.uint32],
+    indices_b: NDArray[np.uint32],
+    cutoff: float = 4.5,
+) -> float:
+    """Compute native contacts Q value (fraction of contacts preserved).
+
+    A "native contact" is a pair (i from group A, j from group B) whose
+    distance in the reference structure is ≤ cutoff. Q is the fraction
+    of those contacts still within cutoff in the current frame.
+
+    Args:
+        ref_coords: (n_atoms, 3) reference coordinates.
+        coords: (n_atoms, 3) current frame coordinates.
+        indices_a: Atom indices for group A.
+        indices_b: Atom indices for group B.
+        cutoff: Distance cutoff in Angstroms. Default 4.5.
+
+    Returns:
+        Q value in [0, 1].
+    """
+    if ref_coords.shape != coords.shape:
+        msg = f"ref_coords shape {ref_coords.shape} != coords shape {coords.shape}"
+        raise ValueError(msg)
+
+    ffi = get_ffi()
+    ref_x, ref_y, ref_z = _to_soa(ref_coords)
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+    indices_a = _as_u32(indices_a)
+    indices_b = _as_u32(indices_b)
+
+    result = ffi.new("double*")
+    _check(
+        get_lib().ztraj_native_contacts_q(
+            _ptr_f32(ref_x),
+            _ptr_f32(ref_y),
+            _ptr_f32(ref_z),
+            _ptr_f32(x),
+            _ptr_f32(y),
+            _ptr_f32(z),
+            n_atoms,
+            _ptr_u32(indices_a),
+            len(indices_a),
+            _ptr_u32(indices_b),
+            len(indices_b),
+            cutoff,
+            result,
+        ),
+        "compute_native_contacts_q",
+    )
+    return float(result[0])
