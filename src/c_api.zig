@@ -1000,7 +1000,6 @@ export fn ztraj_compute_sasa(
 // PBC (Periodic Boundary Conditions)
 // =============================================================================
 
-/// Parse box from flat 9-element f32 array to [3][3]f32.
 /// Compute native contacts Q value (hard-cut).
 export fn ztraj_native_contacts_q(
     ref_x: [*]const f32,
@@ -1020,6 +1019,15 @@ export fn ztraj_native_contacts_q(
     if (n_atoms == 0 or n_a == 0 or n_b == 0) {
         result.* = 0.0;
         return ZTRAJ_OK;
+    }
+    if (cutoff < 0) return ZTRAJ_ERROR_INVALID_INPUT;
+
+    // Bounds check indices
+    for (indices_a[0..n_a]) |idx| {
+        if (idx >= n_atoms) return ZTRAJ_ERROR_INVALID_INPUT;
+    }
+    for (indices_b[0..n_b]) |idx| {
+        if (idx >= n_atoms) return ZTRAJ_ERROR_INVALID_INPUT;
     }
 
     result.* = native_contacts_mod.computeQ(

@@ -363,6 +363,10 @@ def compute_native_contacts_q(
     Returns:
         Q value in [0, 1].
     """
+    if ref_coords.shape != coords.shape:
+        msg = f"ref_coords shape {ref_coords.shape} != coords shape {coords.shape}"
+        raise ValueError(msg)
+
     ffi = get_ffi()
     ref_x, ref_y, ref_z = _to_soa(ref_coords)
     x, y, z = _to_soa(coords)
