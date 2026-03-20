@@ -434,24 +434,17 @@ export fn ztraj_rmsf(
     else
         null;
 
-    // Build Frame slice from flat contiguous data.
-    // SAFETY: @constCast is safe here because rmsf_mod.compute only reads
-    // frame coordinates (verified in rmsf.zig). Frame.x/y/z are declared
-    // as []f32 (mutable) but RMSF never writes to them.
+    // Build non-owning Frame views from flat contiguous data.
     const frames = c_allocator.alloc(types.Frame, n_frames) catch return ZTRAJ_ERROR_OUT_OF_MEMORY;
     defer c_allocator.free(frames);
 
     for (0..n_frames) |f| {
         const offset = f * n_atoms;
-        frames[f] = .{
-            .x = @constCast(all_x[offset .. offset + n_atoms]),
-            .y = @constCast(all_y[offset .. offset + n_atoms]),
-            .z = @constCast(all_z[offset .. offset + n_atoms]),
-            .box_vectors = null,
-            .time = 0.0,
-            .step = 0,
-            .allocator = c_allocator,
-        };
+        frames[f] = types.Frame.initView(
+            all_x[offset .. offset + n_atoms],
+            all_y[offset .. offset + n_atoms],
+            all_z[offset .. offset + n_atoms],
+        );
     }
 
     const rmsf_result = rmsf_mod.compute(c_allocator, frames, indices) catch |err| {
@@ -827,17 +820,7 @@ export fn ztraj_detect_hbonds(
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
 
-    // Build a temporary Frame from the provided coordinates
-    // SAFETY: hbonds.detect only reads coordinates
-    const frame = types.Frame{
-        .x = @constCast(x[0..n_atoms]),
-        .y = @constCast(y[0..n_atoms]),
-        .z = @constCast(z[0..n_atoms]),
-        .box_vectors = null,
-        .time = 0.0,
-        .step = 0,
-        .allocator = c_allocator,
-    };
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
     const config = hbonds_mod.Config{
         .dist_cutoff = dist_cutoff,
@@ -911,16 +894,7 @@ export fn ztraj_compute_contacts(
         else => return ZTRAJ_ERROR_INVALID_INPUT,
     };
 
-    // SAFETY: contacts.compute only reads coordinates
-    const frame = types.Frame{
-        .x = @constCast(x[0..n_atoms]),
-        .y = @constCast(y[0..n_atoms]),
-        .z = @constCast(z[0..n_atoms]),
-        .box_vectors = null,
-        .time = 0.0,
-        .step = 0,
-        .allocator = c_allocator,
-    };
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
     const contacts = contacts_mod.compute(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff) catch {
         return ZTRAJ_ERROR_OUT_OF_MEMORY;
@@ -1070,15 +1044,11 @@ export fn ztraj_msd(
 
     for (0..n_frames) |f| {
         const offset = f * n_atoms;
-        frames[f] = .{
-            .x = @constCast(all_x[offset .. offset + n_atoms]),
-            .y = @constCast(all_y[offset .. offset + n_atoms]),
-            .z = @constCast(all_z[offset .. offset + n_atoms]),
-            .box_vectors = null,
-            .time = 0.0,
-            .step = 0,
-            .allocator = c_allocator,
-        };
+        frames[f] = types.Frame.initView(
+            all_x[offset .. offset + n_atoms],
+            all_y[offset .. offset + n_atoms],
+            all_z[offset .. offset + n_atoms],
+        );
     }
 
     const msd_result = msd_mod.compute(c_allocator, frames, indices) catch |err| {
@@ -1117,15 +1087,11 @@ export fn ztraj_pca_covariance(
 
     for (0..n_frames) |f| {
         const offset = f * n_atoms;
-        frames[f] = .{
-            .x = @constCast(all_x[offset .. offset + n_atoms]),
-            .y = @constCast(all_y[offset .. offset + n_atoms]),
-            .z = @constCast(all_z[offset .. offset + n_atoms]),
-            .box_vectors = null,
-            .time = 0.0,
-            .step = 0,
-            .allocator = c_allocator,
-        };
+        frames[f] = types.Frame.initView(
+            all_x[offset .. offset + n_atoms],
+            all_y[offset .. offset + n_atoms],
+            all_z[offset .. offset + n_atoms],
+        );
     }
 
     const cov = pca_mod.computeCovarianceMatrix(c_allocator, frames, indices) catch |err| {
