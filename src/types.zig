@@ -267,6 +267,7 @@ pub const Frame = struct {
         y: []const f32,
         z: []const f32,
     ) Frame {
+        std.debug.assert(x.len == y.len and y.len == z.len);
         return .{
             // SAFETY: The coordinate slices are treated as read-only by all
             // analysis functions. @constCast is needed because Frame.x is []f32
@@ -684,4 +685,16 @@ test "Chain fields" {
     };
     try std.testing.expect(chain.name.eqlSlice("A"));
     try std.testing.expectEqual(@as(u32, 100), chain.residue_range.end());
+}
+
+test "Frame initView creates non-owning view" {
+    const x = [_]f32{ 1.0, 2.0 };
+    const y = [_]f32{ 3.0, 4.0 };
+    const z = [_]f32{ 5.0, 6.0 };
+    var frame = Frame.initView(&x, &y, &z);
+    try std.testing.expect(!frame.owns);
+    try std.testing.expectEqual(@as(usize, 2), frame.nAtoms());
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), frame.x[0], 1e-7);
+    // deinit on view is a no-op — should not crash
+    frame.deinit();
 }
