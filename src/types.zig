@@ -227,6 +227,8 @@ pub const Frame = struct {
     /// Integer step counter. 0 if not stored in the file.
     step: i32,
     allocator: std.mem.Allocator,
+    /// Whether this Frame owns its coordinate memory.
+    owns: bool = true,
 
     /// Allocate x/y/z arrays for n_atoms atoms.
     /// Arrays are zeroed to avoid spurious values if partially written.
@@ -252,11 +254,39 @@ pub const Frame = struct {
             .time = 0.0,
             .step = 0,
             .allocator = allocator,
+            .owns = true,
         };
     }
 
-    /// Free all coordinate arrays.
+    /// Create a non-owning Frame view over const coordinate slices.
+    /// The resulting Frame does NOT own its coordinate memory —
+    /// calling deinit() on it is a no-op.
+    /// Use this for C API functions that receive raw const pointers.
+    pub fn initView(
+        x: []const f32,
+        y: []const f32,
+        z: []const f32,
+    ) Frame {
+        std.debug.assert(x.len == y.len and y.len == z.len);
+        return .{
+            // SAFETY: The coordinate slices are treated as read-only by all
+            // analysis functions. @constCast is needed because Frame.x is []f32
+            // (required by I/O writers that fill frame buffers). The 'owns'
+            // flag ensures deinit() does not attempt to free this memory.
+            .x = @constCast(x),
+            .y = @constCast(y),
+            .z = @constCast(z),
+            .box_vectors = null,
+            .time = 0.0,
+            .step = 0,
+            .allocator = undefined,
+            .owns = false,
+        };
+    }
+
+    /// Free all coordinate arrays (only if this Frame owns them).
     pub fn deinit(self: *Frame) void {
+        if (!self.owns) return;
         self.allocator.free(self.x);
         self.allocator.free(self.y);
         self.allocator.free(self.z);
@@ -655,4 +685,16 @@ test "Chain fields" {
     };
     try std.testing.expect(chain.name.eqlSlice("A"));
     try std.testing.expectEqual(@as(u32, 100), chain.residue_range.end());
+}
+
+test "Frame initView creates non-owning view" {
+    const x = [_]f32{ 1.0, 2.0 };
+    const y = [_]f32{ 3.0, 4.0 };
+    const z = [_]f32{ 5.0, 6.0 };
+    var frame = Frame.initView(&x, &y, &z);
+    try std.testing.expect(!frame.owns);
+    try std.testing.expectEqual(@as(usize, 2), frame.nAtoms());
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), frame.x[0], 1e-7);
+    // deinit on view is a no-op — should not crash
+    frame.deinit();
 }
