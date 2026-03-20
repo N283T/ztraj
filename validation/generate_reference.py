@@ -198,6 +198,58 @@ def gen_sasa() -> None:
     )
 
 
+def gen_phi_psi() -> None:
+    """Generate phi/psi reference: per-residue backbone dihedrals for frame 0."""
+    traj = md.load(PDB)
+
+    # mdtraj returns (n_frames, n_dihedrals) in radians
+    # indices shape: (n_dihedrals, 4) — atom indices for each dihedral
+    phi_indices, phi_vals = md.compute_phi(traj)
+    psi_indices, psi_vals = md.compute_psi(traj)
+
+    save_json(
+        "phi_psi",
+        {
+            "description": "Backbone phi/psi angles (frame 0, radians)",
+            "system": "3tvj_I",
+            "n_residues": traj.n_residues,
+            "phi": phi_vals[0].tolist(),
+            "psi": psi_vals[0].tolist(),
+            "phi_residue_indices": phi_indices[:, 1].tolist(),  # CA atom → residue
+            "psi_residue_indices": psi_indices[:, 1].tolist(),
+        },
+    )
+
+
+def gen_superpose() -> None:
+    """Generate superposition reference: RMSD after alignment for trajectory."""
+    traj = md.load(XTC, top=PDB)
+    ref = traj[0]
+
+    # Superpose all frames onto frame 0 using backbone
+    backbone = traj.topology.select("backbone")
+    traj_aligned = traj.superpose(ref, atom_indices=backbone)
+
+    # RMSD after alignment (should match ztraj RMSD since QCP does superposition)
+    rmsd_after = md.rmsd(traj_aligned, ref, atom_indices=backbone)  # nm
+    rmsd_ang = (rmsd_after * 10.0).tolist()  # → Å
+
+    # Also save first aligned frame coords for direct comparison
+    first_aligned = traj_aligned.xyz[5] * 10.0  # frame 5, nm → Å
+
+    save_json(
+        "superpose",
+        {
+            "description": "Superposition reference: RMSD after backbone alignment",
+            "system": "3tvj_I_R1",
+            "n_frames": traj.n_frames,
+            "rmsd_after_alignment": rmsd_ang,
+            "aligned_frame5_coords": first_aligned.tolist(),
+            "backbone_indices": backbone.tolist(),
+        },
+    )
+
+
 def main() -> None:
     print("Generating mdtraj reference values for 3tvj_I_R1...")
     print(f"  PDB: {PDB}")
@@ -213,6 +265,8 @@ def main() -> None:
         ("Dihedrals", gen_dihedrals),
         ("Center of mass", gen_center_of_mass),
         ("DSSP", gen_dssp),
+        ("Phi/Psi", gen_phi_psi),
+        ("Superpose", gen_superpose),
         ("SASA", gen_sasa),
     ]
 

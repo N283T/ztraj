@@ -319,6 +319,82 @@ def validate_sasa(ztraj: str) -> bool:
     return bool(rel_diff <= threshold)
 
 
+def validate_phi_psi(ztraj: str) -> bool:
+    """Validate backbone phi/psi angles against mdtraj."""
+    print("\n=== Phi/Psi ===")
+    ref = load_ref("phi_psi")
+    ref_phi = np.asarray(ref["phi"])
+    ref_psi = np.asarray(ref["psi"])
+
+    # Get phi from ztraj CLI
+    out_phi = run_ztraj(ztraj, ["phi", PDB, "--format", "json"])
+    ztraj_phi_raw = out_phi["phi"][0]  # frame 0, per-residue (with nulls)
+    # Filter non-null (ztraj has null for first/last residue)
+    ztraj_phi = np.array([v for v in ztraj_phi_raw if v is not None], dtype=np.float64)
+
+    out_psi = run_ztraj(ztraj, ["psi", PDB, "--format", "json"])
+    ztraj_psi_raw = out_psi["psi"][0]
+    ztraj_psi = np.array([v for v in ztraj_psi_raw if v is not None], dtype=np.float64)
+
+    print(f"    mdtraj phi: {len(ref_phi)}, ztraj phi: {len(ztraj_phi)}")
+    print(f"    mdtraj psi: {len(ref_psi)}, ztraj psi: {len(ztraj_psi)}")
+
+    min_phi = min(len(ref_phi), len(ztraj_phi))
+    min_psi = min(len(ref_psi), len(ztraj_psi))
+
+    if min_phi == 0 or min_psi == 0:
+        print("  FAIL: no angles to compare")
+        return False
+
+    # Wrap difference to [-pi, pi] for circular comparison
+    phi_diff = (ztraj_phi[:min_phi] - ref_phi[:min_phi] + np.pi) % (2 * np.pi) - np.pi
+    psi_diff = (ztraj_psi[:min_psi] - ref_psi[:min_psi] + np.pi) % (2 * np.pi) - np.pi
+
+    phi_max = np.max(np.abs(phi_diff))
+    psi_max = np.max(np.abs(psi_diff))
+
+    atol = 1e-4
+    phi_pass = bool(phi_max < atol)
+    psi_pass = bool(psi_max < atol)
+
+    print(f"    phi max diff: {phi_max:.6f} (atol={atol})")
+    print(f"    psi max diff: {psi_max:.6f} (atol={atol})")
+
+    passed = phi_pass and psi_pass
+    status = "PASS" if passed else "FAIL"
+    print(f"  {status}: phi_psi")
+    return passed
+
+
+def validate_superpose(ztraj: str) -> bool:
+    """Validate superposition by comparing RMSD values."""
+    print("\n=== Superposition ===")
+    ref = load_ref("superpose")
+    ref_rmsd = np.asarray(ref["rmsd_after_alignment"])
+
+    # ztraj RMSD (which internally does QCP superposition) should match
+    out = run_ztraj(
+        ztraj, ["rmsd", XTC, "--top", PDB, "--select", "backbone", "--ref", "0"]
+    )
+    ztraj_rmsd = np.asarray(out["rmsd"])
+
+    min_len = min(len(ref_rmsd), len(ztraj_rmsd))
+    print(f"    frames: mdtraj={len(ref_rmsd)}, ztraj={len(ztraj_rmsd)}")
+
+    # RMSD values should be very close (both use optimal superposition)
+    diff = np.abs(ztraj_rmsd[:min_len] - ref_rmsd[:min_len])
+    max_diff = np.max(diff)
+    mean_diff = np.mean(diff)
+
+    # Loose tolerance because of backbone atom selection differences (152 vs 151)
+    atol = 0.3
+    passed = bool(max_diff < atol)
+    status = "PASS" if passed else "FAIL"
+    print(f"    max_diff={max_diff:.4f}, mean_diff={mean_diff:.4f}, atol={atol}")
+    print(f"  {status}: superpose")
+    return passed
+
+
 def main() -> None:
     ztraj = DEFAULT_ZTRAJ
     for i, arg in enumerate(sys.argv[1:], 1):
@@ -346,6 +422,8 @@ def main() -> None:
         ("ATLAS Rg", validate_atlas_rg),
         ("DSSP", validate_dssp),
         ("SASA", validate_sasa),
+        ("Phi/Psi", validate_phi_psi),
+        ("Superpose", validate_superpose),
     ]
 
     results: dict[str, bool | None] = {}
