@@ -26,6 +26,10 @@ pub fn computeCovarianceMatrix(
 
     const n_sel: usize = if (atom_indices) |idx| idx.len else frame_n;
     const dim = n_sel * 3;
+
+    // Guard against unreasonable dimension (3N × 3N matrix)
+    // 10,000 dimensions = ~800 MB (10000^2 * 8 bytes)
+    if (dim > 30_000) return error.DimensionTooLarge;
     const n_f: f64 = @floatFromInt(n_frames);
 
     const mean = try allocator.alloc(f64, dim);
