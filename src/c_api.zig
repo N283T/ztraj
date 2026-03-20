@@ -47,7 +47,7 @@ pub const ZTRAJ_ERROR_EOF: c_int = -5;
 // Version
 // =============================================================================
 
-const VERSION: [*:0]const u8 = "0.2.0";
+const VERSION: [*:0]const u8 = "0.3.0";
 
 /// Get the library version string.
 export fn ztraj_version() callconv(.c) [*:0]const u8 {

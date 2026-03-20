@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.3.0] - 2026-03-21
+
+### Added
+- Native DSSP secondary structure assignment (replaced vendored zdssp)
+- Protein-specific dihedrals: phi, psi, omega, chi1-chi4 CLI commands
+- Structural superposition (QCP-based optimal alignment with `Frame.initView`)
+- PBC support: wrap coordinates, minimum image distance, make molecules whole
+- TRR trajectory format support (GROMACS)
+- Native contacts Q value (hard-cut and soft-cut)
+- MSD (Mean Square Displacement) for diffusion analysis
+- PCA (Principal Component Analysis) of coordinate fluctuations
+- Validation suite expanded to 14 tests (pytest-based, vs mdtraj references)
+  - Added phi/psi, superposition, PBC distance, DSSP, SASA validations
+- `Frame.initView()` for safe non-owning views over const coordinate slices
+
+### Changed
+- DSSP: native implementation using ztraj types (atom indices into Frame)
+  instead of vendored zdssp copy (removed 9058 lines)
+- Validation suite moved from PEP 723 script to pytest
+- Python `_pack_frames` helper extracted to eliminate 3× duplication
+- CI validation job uses pytest instead of standalone script
+
+### Fixed
+- Superposition S matrix convention (was transposed vs rmsd.zig)
+- PBC box validation (reject zero/negative diagonals)
+- PCA dimension overflow guard (reject dim > 30,000)
+- Native contacts bounds check on atom indices
+- `@constCast` eliminated from C API via `Frame.initView()`
+
 ## [0.2.0] - 2026-03-19
 
 ### Added
