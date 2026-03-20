@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pyztraj._ffi import get_ffi, get_lib
-from pyztraj._helpers import _as_u32, _check, _ptr_f32, _ptr_f64, _ptr_u32, _to_soa
+from pyztraj._helpers import (
+    _as_u32,
+    _check,
+    _pack_frames,
+    _ptr_f32,
+    _ptr_f64,
+    _ptr_u32,
+    _to_soa,
+)
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -373,23 +381,7 @@ def compute_rmsf(
 
     ffi = get_ffi()
     lib = get_lib()
-
-    n_frames = len(frames)
-    n_atoms = frames[0].shape[0]
-
-    all_x = np.empty(n_frames * n_atoms, dtype=np.float32)
-    all_y = np.empty(n_frames * n_atoms, dtype=np.float32)
-    all_z = np.empty(n_frames * n_atoms, dtype=np.float32)
-
-    for i, frame in enumerate(frames):
-        frame = np.ascontiguousarray(frame, dtype=np.float32)
-        if frame.shape != (n_atoms, 3):
-            msg = f"Frame {i} shape {frame.shape} != expected ({n_atoms}, 3)"
-            raise ValueError(msg)
-        offset = i * n_atoms
-        all_x[offset : offset + n_atoms] = frame[:, 0]
-        all_y[offset : offset + n_atoms] = frame[:, 1]
-        all_z[offset : offset + n_atoms] = frame[:, 2]
+    all_x, all_y, all_z, n_frames, n_atoms = _pack_frames(frames)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -557,19 +549,7 @@ def compute_msd(
 
     ffi = get_ffi()
     lib = get_lib()
-    n_frames = len(frames)
-    n_atoms = frames[0].shape[0]
-
-    all_x = np.empty(n_frames * n_atoms, dtype=np.float32)
-    all_y = np.empty(n_frames * n_atoms, dtype=np.float32)
-    all_z = np.empty(n_frames * n_atoms, dtype=np.float32)
-
-    for i, frame in enumerate(frames):
-        frame = np.ascontiguousarray(frame, dtype=np.float32)
-        offset = i * n_atoms
-        all_x[offset : offset + n_atoms] = frame[:, 0]
-        all_y[offset : offset + n_atoms] = frame[:, 1]
-        all_z[offset : offset + n_atoms] = frame[:, 2]
+    all_x, all_y, all_z, n_frames, n_atoms = _pack_frames(frames)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)

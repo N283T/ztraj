@@ -69,3 +69,31 @@ def _ptr_u32(arr: NDArray[np.uint32]):
 def _ptr_i32(arr: NDArray[np.int32]):
     """Get CFFI pointer to int32 array data."""
     return get_ffi().cast("int32_t*", arr.ctypes.data)
+
+
+def _pack_frames(
+    frames: list[NDArray[np.float32]],
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, int]:
+    """Pack list of (n_atoms, 3) frames into flat SOA arrays.
+
+    Returns:
+        (all_x, all_y, all_z, n_frames, n_atoms)
+    """
+    n_frames = len(frames)
+    n_atoms = frames[0].shape[0]
+
+    all_x = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_y = np.empty(n_frames * n_atoms, dtype=np.float32)
+    all_z = np.empty(n_frames * n_atoms, dtype=np.float32)
+
+    for i, frame in enumerate(frames):
+        frame = np.ascontiguousarray(frame, dtype=np.float32)
+        if frame.shape != (n_atoms, 3):
+            msg = f"Frame {i} shape {frame.shape} != expected ({n_atoms}, 3)"
+            raise ValueError(msg)
+        offset = i * n_atoms
+        all_x[offset : offset + n_atoms] = frame[:, 0]
+        all_y[offset : offset + n_atoms] = frame[:, 1]
+        all_z[offset : offset + n_atoms] = frame[:, 2]
+
+    return all_x, all_y, all_z, n_frames, n_atoms
