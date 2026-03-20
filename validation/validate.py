@@ -395,6 +395,56 @@ def validate_superpose(ztraj: str) -> bool:
     return passed
 
 
+def validate_pbc_distances(ztraj: str) -> bool | None:
+    """Validate PBC minimum image distances against mdtraj reference."""
+    print("\n=== PBC Distances ===")
+    ref_path = REF_DIR / "pbc_distances.json"
+    if not ref_path.exists():
+        print("  SKIP: pbc_distances.json not found")
+        return None
+
+    pdb_path = DATA_DIR / "3tvj_I_full.pdb"
+    if not pdb_path.exists():
+        print("  SKIP: full system PDB not found")
+        return None
+
+    ref = json.loads(ref_path.read_text())
+    ref_d_pbc = np.asarray(ref["d_pbc"])
+    pairs = ref["pairs"]
+    box_nm = ref["box_nm"]
+    box_ang = [b * 10.0 for b in box_nm]  # nm → Å
+
+    # Use pyztraj Python API for PBC distance
+    try:
+        import pyztraj
+    except ImportError:
+        print("  SKIP: pyztraj not installed (run 'pip install -e python/' first)")
+        return None
+
+    struct = pyztraj.load_pdb(str(pdb_path))
+    box = np.diag(box_ang).astype(np.float32)
+
+    ztraj_d = []
+    for pair in pairs:
+        a, b = int(pair[0]), int(pair[1])
+        d = pyztraj.minimum_image_distance(struct.coords[a], struct.coords[b], box)
+        ztraj_d.append(d)
+    ztraj_d = np.asarray(ztraj_d)
+
+    diff = np.abs(ztraj_d - ref_d_pbc)
+    max_diff = np.max(diff)
+    mean_diff = np.mean(diff)
+
+    atol = 0.1  # 0.1 Å tolerance for f32 precision
+    passed = bool(max_diff < atol)
+    status = "PASS" if passed else "FAIL"
+    print(
+        f"    {len(pairs)} pairs, max_diff={max_diff:.4f}, mean_diff={mean_diff:.4f}, atol={atol}"
+    )
+    print(f"  {status}: pbc_distances")
+    return passed
+
+
 def main() -> None:
     ztraj = DEFAULT_ZTRAJ
     for i, arg in enumerate(sys.argv[1:], 1):
@@ -424,6 +474,7 @@ def main() -> None:
         ("SASA", validate_sasa),
         ("Phi/Psi", validate_phi_psi),
         ("Superpose", validate_superpose),
+        ("PBC distances", validate_pbc_distances),
     ]
 
     results: dict[str, bool | None] = {}
