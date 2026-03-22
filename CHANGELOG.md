@@ -8,6 +8,8 @@
   - Orthogonal and triclinic box vector support
   - Automatic nm-to-Angstrom unit conversion
 - `summary` CLI command: show structure/trajectory overview (atoms, residues, chains, box, elements)
+- `convert` CLI command: convert between PDB and GRO formats
+- PDB and GRO file writers for format conversion
 
 ## [0.3.0] - 2026-03-21
 
