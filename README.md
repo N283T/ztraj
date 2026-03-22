@@ -13,7 +13,7 @@ High-performance molecular dynamics trajectory analysis library and CLI, written
 - **Fast**: SIMD-accelerated computation with multi-threaded execution
 - **Comprehensive**: RMSD, RMSF, Rg, distances, angles, dihedrals, inertia tensor, hydrogen bonds, contacts, RDF
 - **Dual interface**: CLI tool (`ztraj`) and Python library (`pyztraj`)
-- **Streaming**: Memory-efficient frame-by-frame XTC trajectory reading
+- **Streaming**: Memory-efficient frame-by-frame XTC/TRR trajectory reading
 - **Validated**: Tested against mdtraj reference values and MD ATLAS
 
 ## CLI
@@ -32,6 +32,9 @@ ztraj distances traj.xtc --top structure.pdb --pairs "0-10,1-20"
 
 # RDF between selections
 ztraj rdf traj.xtc --top structure.pdb --sel1 "O" --sel2 "H" --rmax 8.0
+
+# GRO topology support
+ztraj rmsd traj.xtc --top structure.gro --select backbone --ref 0
 
 # Hydrogen bonds
 ztraj hbonds structure.pdb
@@ -99,7 +102,9 @@ r, g_r = pyztraj.compute_rdf(sel1_coords, sel2_coords, box_volume=1000.0)
 |--------|------|-------|
 | PDB | Yes | Topology + coordinates |
 | mmCIF | Yes | Topology + coordinates |
+| GRO | Yes | Topology + coordinates (GROMACS) |
 | XTC | Yes | Streaming trajectory (GROMACS) |
+| TRR | Yes | Trajectory (GROMACS) |
 | DCD | Yes | Trajectory (CHARMM/NAMD) |
 
 ## Building from source

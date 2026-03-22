@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- GRO (GROMACS) format support for topology and coordinate reading
+  - Dynamic coordinate field width detection (handles variable precision)
+  - Orthogonal and triclinic box vector support
+  - Automatic nm-to-Angstrom unit conversion
+
 ## [0.3.0] - 2026-03-21
 
 ### Added
