@@ -7,6 +7,7 @@
   - Dynamic coordinate field width detection (handles variable precision)
   - Orthogonal and triclinic box vector support
   - Automatic nm-to-Angstrom unit conversion
+- `summary` CLI command: show structure/trajectory overview (atoms, residues, chains, box, elements)
 
 ## [0.3.0] - 2026-03-21
 

@@ -1262,3 +1262,125 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
     }
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommand: summary
+// ============================================================================
+
+pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
+    const top_path = args.top_path orelse args.traj_path;
+    var parsed = try loader.loadTopology(allocator, top_path);
+    defer parsed.deinit();
+
+    const topo = &parsed.topology;
+    const frame = &parsed.frame;
+
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    // -- File + basic counts ------------------------------------------------
+    try w.print("File:     {s}\n", .{top_path});
+    try w.print("Atoms:    {d}  Residues: {d}  Chains: {d}  Bonds: {d}\n", .{
+        topo.atoms.len, topo.residues.len, topo.chains.len, topo.bonds.len,
+    });
+
+    // -- Box vectors --------------------------------------------------------
+    if (frame.box_vectors) |box| {
+        const is_ortho = @abs(box[0][1]) < 0.001 and @abs(box[0][2]) < 0.001 and
+            @abs(box[1][0]) < 0.001 and @abs(box[1][2]) < 0.001 and
+            @abs(box[2][0]) < 0.001 and @abs(box[2][1]) < 0.001;
+        if (is_ortho) {
+            try w.print("Box:      {d:.3} x {d:.3} x {d:.3} A\n", .{ box[0][0], box[1][1], box[2][2] });
+        } else {
+            try w.print("Box:      [{d:.3}, {d:.3}, {d:.3}]\n", .{ box[0][0], box[0][1], box[0][2] });
+            try w.print("          [{d:.3}, {d:.3}, {d:.3}]\n", .{ box[1][0], box[1][1], box[1][2] });
+            try w.print("          [{d:.3}, {d:.3}, {d:.3}]\n", .{ box[2][0], box[2][1], box[2][2] });
+        }
+    } else {
+        try w.print("Box:      (none)\n", .{});
+    }
+
+    // -- Time ---------------------------------------------------------------
+    if (frame.time != 0.0) {
+        try w.print("Time:     {d:.3} ps\n", .{frame.time});
+    }
+
+    // -- Chains + residues --------------------------------------------------
+    if (topo.chains.len > 0) {
+        try w.print("\nChains:\n", .{});
+        for (topo.chains, 0..) |chain, ci| {
+            const rr = chain.residue_range;
+            if (rr.len == 0) continue;
+            const first_res = topo.residues[rr.start];
+            const last_res = topo.residues[rr.start + rr.len - 1];
+            var chain_atoms: u32 = 0;
+            for (topo.residues[rr.start .. rr.start + rr.len]) |res| {
+                chain_atoms += res.atom_range.len;
+            }
+            const chain_name = chain.name.slice();
+            const name_str = if (chain_name.len > 0) chain_name else "(unnamed)";
+            try w.print("  [{d}] {s} : {d} residues ({s} {d} .. {s} {d}), {d} atoms\n", .{
+                ci,
+                name_str,
+                rr.len,
+                first_res.name.slice(),
+                first_res.resid,
+                last_res.name.slice(),
+                last_res.resid,
+                chain_atoms,
+            });
+        }
+    }
+
+    // -- Element composition ------------------------------------------------
+    const Element = ztraj.element.Element;
+    const num_elements = @typeInfo(Element).@"enum".fields.len;
+    var elem_counts = [_]u32{0} ** num_elements;
+    for (topo.atoms) |atom| {
+        elem_counts[@intFromEnum(atom.element)] += 1;
+    }
+    try w.print("\nElements: ", .{});
+    var first_elem = true;
+    const common_elems = [_]Element{ .H, .C, .N, .O, .S, .P, .Fe, .Zn, .Ca, .Mg, .Na, .Cl, .K };
+    for (common_elems) |e| {
+        const idx = @intFromEnum(e);
+        if (elem_counts[idx] > 0) {
+            if (!first_elem) try w.print("  ", .{});
+            try w.print("{s}:{d}", .{ @tagName(e), elem_counts[idx] });
+            elem_counts[idx] = 0;
+            first_elem = false;
+        }
+    }
+    for (elem_counts, 0..) |count, idx| {
+        if (count > 0) {
+            const e: Element = @enumFromInt(idx);
+            if (!first_elem) try w.print("  ", .{});
+            try w.print("{s}:{d}", .{ @tagName(e), count });
+            first_elem = false;
+        }
+    }
+    if (first_elem) try w.print("(none)", .{});
+    try w.print("\n", .{});
+
+    // -- Trajectory info (if separate trajectory file) ----------------------
+    const has_traj = args.top_path != null;
+    if (has_traj) {
+        const frames = try loader.loadAllFrames(allocator, args.traj_path, topo.atoms.len);
+        defer {
+            for (frames) |*f| @constCast(f).deinit();
+            allocator.free(frames);
+        }
+        try w.print("\nTrajectory: {s}\n", .{args.traj_path});
+        try w.print("Frames:     {d}\n", .{frames.len});
+        if (frames.len > 0) {
+            const first_time = frames[0].time;
+            const last_time = frames[frames.len - 1].time;
+            if (first_time != 0.0 or last_time != 0.0) {
+                try w.print("Time:       {d:.3} .. {d:.3} ps\n", .{ first_time, last_time });
+            }
+        }
+    }
+
+    try flushOutput(buf.items, args.output_path);
+}

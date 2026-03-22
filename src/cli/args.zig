@@ -27,6 +27,7 @@ pub const Subcommand = enum {
     psi,
     omega,
     chi,
+    summary,
 };
 
 // ============================================================================
@@ -98,6 +99,7 @@ pub fn printUsage(prog: []const u8) void {
         \\  psi         Backbone psi dihedral angles per residue
         \\  omega       Backbone omega dihedral angles per residue
         \\  chi         Side-chain chi dihedral angles per residue
+        \\  summary     Show structure/trajectory summary (atoms, residues, chains, box)
         \\
         \\Common options:
         \\  --top <file>           Topology file (PDB or mmCIF); required unless traj is PDB/CIF
@@ -164,6 +166,7 @@ pub fn parseArgs(raw: []const []const u8) ParseArgsError!Args {
         if (std.mem.eql(u8, sub_str, "psi")) break :blk .psi;
         if (std.mem.eql(u8, sub_str, "omega")) break :blk .omega;
         if (std.mem.eql(u8, sub_str, "chi")) break :blk .chi;
+        if (std.mem.eql(u8, sub_str, "summary")) break :blk .summary;
         return ParseArgsError.UnknownSubcommand;
     };
 
