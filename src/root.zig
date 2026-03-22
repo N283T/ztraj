@@ -41,6 +41,7 @@ pub const io = struct {
     pub const xtc = @import("io/xtc.zig");
     pub const trr = @import("io/trr.zig");
     pub const dcd = @import("io/dcd.zig");
+    pub const gro = @import("io/gro.zig");
 };
 
 pub const select = @import("select.zig");

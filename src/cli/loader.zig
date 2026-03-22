@@ -39,11 +39,15 @@ pub fn isTrr(path: []const u8) bool {
     return endsWithCI(path, ".trr");
 }
 
+pub fn isGro(path: []const u8) bool {
+    return endsWithCI(path, ".gro");
+}
+
 // ============================================================================
 // Topology loading
 // ============================================================================
 
-/// Load topology + first frame from a PDB or CIF file.
+/// Load topology + first frame from a PDB, CIF, or GRO file.
 /// Returns a ParseResult; caller must call .deinit().
 pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.ParseResult {
     const data = try std.fs.cwd().readFileAlloc(allocator, path, 512 * 1024 * 1024);
@@ -53,9 +57,11 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
         return io.pdb.parse(allocator, data);
     } else if (isCif(path)) {
         return io.mmcif.parse(allocator, data);
+    } else if (isGro(path)) {
+        return io.gro.parse(allocator, data);
     } else {
         std.debug.print(
-            "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif)\n",
+            "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif, .gro)\n",
             .{path},
         );
         std.process.exit(1);
@@ -126,9 +132,11 @@ pub fn loadAllFrames(
             try io.pdb.parse(allocator, data)
         else if (isCif(traj_path))
             try io.mmcif.parse(allocator, data)
+        else if (isGro(traj_path))
+            try io.gro.parse(allocator, data)
         else {
             std.debug.print(
-                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif)\n",
+                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
                 .{traj_path},
             );
             std.process.exit(1);
