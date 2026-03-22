@@ -1335,19 +1335,17 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
 
     // -- Element composition ------------------------------------------------
     const Element = ztraj.element.Element;
-    var elem_counts = [_]u32{0} ** 128;
+    const num_elements = @typeInfo(Element).@"enum".fields.len;
+    var elem_counts = [_]u32{0} ** num_elements;
     for (topo.atoms) |atom| {
-        const idx = @intFromEnum(atom.element);
-        if (idx < elem_counts.len) {
-            elem_counts[idx] += 1;
-        }
+        elem_counts[@intFromEnum(atom.element)] += 1;
     }
     try w.print("\nElements: ", .{});
     var first_elem = true;
     const common_elems = [_]Element{ .H, .C, .N, .O, .S, .P, .Fe, .Zn, .Ca, .Mg, .Na, .Cl, .K };
     for (common_elems) |e| {
         const idx = @intFromEnum(e);
-        if (idx < elem_counts.len and elem_counts[idx] > 0) {
+        if (elem_counts[idx] > 0) {
             if (!first_elem) try w.print("  ", .{});
             try w.print("{s}:{d}", .{ @tagName(e), elem_counts[idx] });
             elem_counts[idx] = 0;
@@ -1366,8 +1364,7 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
     try w.print("\n", .{});
 
     // -- Trajectory info (if separate trajectory file) ----------------------
-    const has_traj = args.top_path != null and
-        !std.mem.eql(u8, args.traj_path, args.top_path.?);
+    const has_traj = args.top_path != null;
     if (has_traj) {
         const frames = try loader.loadAllFrames(allocator, args.traj_path, topo.atoms.len);
         defer {
