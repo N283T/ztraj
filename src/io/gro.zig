@@ -120,7 +120,9 @@ fn inferElement(atom_name: []const u8) elem.Element {
 fn parseTime(title: []const u8) f32 {
     var i: usize = 0;
     while (i + 1 < title.len) : (i += 1) {
-        if (title[i] == 't' and title[i + 1] == '=') {
+        if (title[i] == 't' and title[i + 1] == '=' and
+            (i == 0 or title[i - 1] == ' '))
+        {
             // Skip "t=" and optional spaces
             var j = i + 2;
             while (j < title.len and title[j] == ' ') : (j += 1) {}
@@ -168,13 +170,15 @@ fn parseBoxVectors(line: []const u8) ?[3][3]f32 {
         };
     } else {
         // Triclinic: GRO order is v1x v2y v3z v1y v1z v2x v2z v3x v3y
-        // Row 0 (a vector): [v1x, v2x, v3x] = [idx0, idx5, idx7]
-        // Row 1 (b vector): [v1y, v2y, v3y] = [idx3, idx1, idx8]
-        // Row 2 (c vector): [v1z, v2z, v3z] = [idx4, idx6, idx2]
+        //                         [0]  [1] [2] [3] [4] [5] [6] [7] [8]
+        // ztraj convention: rows are box vectors (row-major, same as XTC/DCD).
+        // Row 0 (a = v1): [v1x, v1y, v1z] = [idx0, idx3, idx4]
+        // Row 1 (b = v2): [v2x, v2y, v2z] = [idx5, idx1, idx6]
+        // Row 2 (c = v3): [v3x, v3y, v3z] = [idx7, idx8, idx2]
         return [3][3]f32{
-            .{ values[0], values[5], values[7] },
-            .{ values[3], values[1], values[8] },
-            .{ values[4], values[6], values[2] },
+            .{ values[0], values[3], values[4] },
+            .{ values[5], values[1], values[6] },
+            .{ values[7], values[8], values[2] },
         };
     }
 }
