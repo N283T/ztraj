@@ -505,3 +505,89 @@ test "parse GRO no atoms returns error" {
     const result = parse(std.testing.allocator, data);
     try std.testing.expectError(ParseError.NoAtomsFound, result);
 }
+
+test "parse GRO triclinic box vectors" {
+    const data =
+        \\Triclinic test
+        \\    1
+        \\    1ALA      N    1   0.100   0.200   0.300
+        \\   1.00000   2.00000   3.00000   0.10000   0.20000   0.30000   0.40000   0.50000   0.60000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expect(result.frame.box_vectors != null);
+    const box = result.frame.box_vectors.?;
+    // GRO order: v1x v2y v3z v1y v1z v2x v2z v3x v3y
+    //            [0]  [1] [2] [3] [4] [5] [6] [7] [8]
+    // ztraj row-major: rows = box vectors
+    // Row 0 (a=v1): [v1x, v1y, v1z] = [idx0, idx3, idx4] = [1.0, 0.1, 0.2] * 10
+    // Row 1 (b=v2): [v2x, v2y, v2z] = [idx5, idx1, idx6] = [0.3, 2.0, 0.4] * 10
+    // Row 2 (c=v3): [v3x, v3y, v3z] = [idx7, idx8, idx2] = [0.5, 0.6, 3.0] * 10
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), box[0][0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), box[0][1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), box[0][2], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), box[1][0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 20.0), box[1][1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), box[1][2], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), box[2][0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), box[2][1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 30.0), box[2][2], 0.01);
+}
+
+test "parse empty GRO returns error" {
+    const result = parse(std.testing.allocator, "");
+    try std.testing.expectError(error.InvalidFormat, result);
+}
+
+test "parse GRO with negative coordinates" {
+    const data =
+        \\Negative coords
+        \\    1
+        \\    1ALA      N    1  -0.100  -0.200  -0.300
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), result.frame.x[0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, -2.0), result.frame.y[0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, -3.0), result.frame.z[0], 0.01);
+}
+
+test "parse GRO element inference" {
+    const data =
+        \\Element test
+        \\    4
+        \\    1ALA      N    1   0.100   0.200   0.300
+        \\    1ALA     CA    2   0.400   0.500   0.600
+        \\    1ALA      O    3   0.700   0.800   0.900
+        \\    1ALA      H    4   1.000   1.100   1.200
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    const elem_mod = @import("../element.zig");
+    try std.testing.expectEqual(elem_mod.Element.N, result.topology.atoms[0].element);
+    try std.testing.expectEqual(elem_mod.Element.C, result.topology.atoms[1].element);
+    try std.testing.expectEqual(elem_mod.Element.O, result.topology.atoms[2].element);
+    try std.testing.expectEqual(elem_mod.Element.H, result.topology.atoms[3].element);
+}
+
+test "parse GRO without time in title" {
+    const data =
+        \\Simple title no time
+        \\    1
+        \\    1ALA      N    1   0.100   0.200   0.300
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    try std.testing.expectEqual(@as(f32, 0.0), result.frame.time);
+}
