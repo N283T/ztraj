@@ -462,6 +462,13 @@ pub fn write(
     topology: types.Topology,
     frame: types.Frame,
 ) !void {
+    if (frame.x.len < topology.atoms.len or
+        frame.y.len < topology.atoms.len or
+        frame.z.len < topology.atoms.len)
+    {
+        return error.FrameTopologyMismatch;
+    }
+
     var serial: u32 = 1;
 
     for (topology.atoms, 0..) |atom, atom_i| {
@@ -503,8 +510,9 @@ pub fn write(
         const y = frame.y[atom_i];
         const z = frame.z[atom_i];
 
-        // Serial wraps at 99999
+        // Serial wraps at 99999, resid wraps at 9999
         const serial_out = serial % 100000;
+        const resid_out = @mod(residue.resid, @as(i32, 10000));
 
         try writer.print(
             "ATOM  {d:>5} {s}{c}{s} {c}{d:>4}    {d:>8.3}{d:>8.3}{d:>8.3}  1.00  0.00          {s}  \n",
@@ -514,7 +522,7 @@ pub fn write(
                 ' ', // alt loc
                 res_field,
                 chain_id,
-                residue.resid,
+                resid_out,
                 x,
                 y,
                 z,
@@ -679,6 +687,15 @@ test "write PDB round-trip" {
         try std.testing.expectEqualStrings(
             result.topology.atoms[i].name.slice(),
             result2.topology.atoms[i].name.slice(),
+        );
+        try std.testing.expectEqual(result.topology.atoms[i].element, result2.topology.atoms[i].element);
+    }
+
+    // Residue names
+    for (0..result.topology.residues.len) |i| {
+        try std.testing.expectEqualStrings(
+            result.topology.residues[i].name.slice(),
+            result2.topology.residues[i].name.slice(),
         );
     }
 }
