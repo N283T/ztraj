@@ -446,11 +446,11 @@ fn formatAtomName(atom_name: []const u8, element_sym: []const u8, out: *[4]u8) v
     const elem_len = element_sym.len;
     if (elem_len <= 1 and atom_name.len <= 3) {
         // " CA " style: space + name left-justified in remaining 3 chars
-        const copy_len = @min(atom_name.len, 3);
+        const copy_len: usize = @min(atom_name.len, 3);
         @memcpy(out[1 .. 1 + copy_len], atom_name[0..copy_len]);
     } else {
         // 2-char element or 4-char name: start at column 13 (index 0)
-        const copy_len = @min(atom_name.len, 4);
+        const copy_len: usize = @min(atom_name.len, 4);
         @memcpy(out[0..copy_len], atom_name[0..copy_len]);
     }
 }
