@@ -433,6 +433,110 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
 }
 
 // ============================================================================
+// Writer
+// ============================================================================
+
+/// Format the atom name field (columns 13-16, 4 chars) according to PDB convention.
+/// - If the element symbol is 1 char and the name is <= 3 chars: " XXX" (leading space).
+/// - Otherwise: fill from column 13 (left-justified within the 4-char field).
+fn formatAtomName(atom_name: []const u8, element_sym: []const u8, out: *[4]u8) void {
+    @memset(out, ' ');
+    if (atom_name.len == 0) return;
+
+    const elem_len = element_sym.len;
+    if (elem_len <= 1 and atom_name.len <= 3) {
+        // " CA " style: space + name left-justified in remaining 3 chars
+        const copy_len: usize = @min(atom_name.len, 3);
+        @memcpy(out[1 .. 1 + copy_len], atom_name[0..copy_len]);
+    } else {
+        // 2-char element or 4-char name: start at column 13 (index 0)
+        const copy_len: usize = @min(atom_name.len, 4);
+        @memcpy(out[0..copy_len], atom_name[0..copy_len]);
+    }
+}
+
+/// Write a Topology + Frame as PDB format.
+/// Coordinates are in Angstroms (no conversion needed).
+pub fn write(
+    writer: anytype,
+    topology: types.Topology,
+    frame: types.Frame,
+) !void {
+    if (frame.x.len < topology.atoms.len or
+        frame.y.len < topology.atoms.len or
+        frame.z.len < topology.atoms.len)
+    {
+        return error.FrameTopologyMismatch;
+    }
+
+    var serial: u32 = 1;
+
+    for (topology.atoms, 0..) |atom, atom_i| {
+        const residue = topology.residues[atom.residue_index];
+        const chain = topology.chains[residue.chain_index];
+
+        // Chain ID: first character of chain name, or space
+        const chain_id: u8 = if (chain.name.len > 0) chain.name.data[0] else ' ';
+
+        // Element symbol from tag name (e.g. "N", "C", "Fe")
+        const elem_sym = @tagName(atom.element);
+
+        // Format atom name field (4 chars)
+        var name_field: [4]u8 = undefined;
+        formatAtomName(atom.name.slice(), elem_sym, &name_field);
+
+        // Residue name: right-justify in 3 chars
+        const res_name = residue.name.slice();
+        var res_field: [3]u8 = .{ ' ', ' ', ' ' };
+        if (res_name.len > 0) {
+            const copy_len = @min(res_name.len, 3);
+            const offset = 3 - copy_len;
+            @memcpy(res_field[offset .. offset + copy_len], res_name[0..copy_len]);
+        }
+
+        // Element symbol: right-justify in 2 chars, uppercase
+        var elem_field: [2]u8 = .{ ' ', ' ' };
+        if (elem_sym.len > 0 and atom.element != .X) {
+            // Convert to uppercase for PDB element field
+            const sym_len = @min(elem_sym.len, 2);
+            const offset = 2 - sym_len;
+            for (0..sym_len) |k| {
+                const c = elem_sym[k];
+                elem_field[offset + k] = if (c >= 'a' and c <= 'z') c - 32 else c;
+            }
+        }
+
+        const x = frame.x[atom_i];
+        const y = frame.y[atom_i];
+        const z = frame.z[atom_i];
+
+        // Serial wraps at 99999, resid wraps at 9999
+        const serial_out = serial % 100000;
+        const resid_out = @mod(residue.resid, @as(i32, 10000));
+
+        try writer.print(
+            "ATOM  {d:>5} {s}{c}{s} {c}{d:>4}    {d:>8.3}{d:>8.3}{d:>8.3}  1.00  0.00          {s}  \n",
+            .{
+                serial_out,
+                name_field,
+                ' ', // alt loc
+                res_field,
+                chain_id,
+                resid_out,
+                x,
+                y,
+                z,
+                elem_field,
+            },
+        );
+
+        serial += 1;
+    }
+
+    try writer.writeAll("END\n");
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -549,6 +653,51 @@ test "parse first model only" {
     // Only the first model's atom should be present
     try std.testing.expectEqual(@as(usize, 1), result.topology.atoms.len);
     try std.testing.expectApproxEqAbs(@as(f32, 11.104), result.frame.x[0], 0.001);
+}
+
+test "write PDB round-trip" {
+    // Parse a minimal PDB, write it back, parse again, compare
+    const input =
+        \\ATOM      1  N   ALA A   1       1.000   2.000   3.000  1.00  0.00           N
+        \\ATOM      2  CA  ALA A   1       4.000   5.000   6.000  1.00  0.00           C
+        \\ATOM      3  C   ALA A   1       7.000   8.000   9.000  1.00  0.00           C
+        \\END
+    ;
+    const allocator = std.testing.allocator;
+
+    var result = try parse(allocator, input);
+    defer result.deinit();
+
+    // Write to buffer
+    var buf = std.ArrayListUnmanaged(u8){};
+    defer buf.deinit(allocator);
+    try write(buf.writer(allocator), result.topology, result.frame);
+
+    // Parse the written output
+    var result2 = try parse(allocator, buf.items);
+    defer result2.deinit();
+
+    // Compare
+    try std.testing.expectEqual(result.topology.atoms.len, result2.topology.atoms.len);
+    try std.testing.expectEqual(result.topology.residues.len, result2.topology.residues.len);
+    for (0..result.topology.atoms.len) |i| {
+        try std.testing.expectApproxEqAbs(result.frame.x[i], result2.frame.x[i], 0.01);
+        try std.testing.expectApproxEqAbs(result.frame.y[i], result2.frame.y[i], 0.01);
+        try std.testing.expectApproxEqAbs(result.frame.z[i], result2.frame.z[i], 0.01);
+        try std.testing.expectEqualStrings(
+            result.topology.atoms[i].name.slice(),
+            result2.topology.atoms[i].name.slice(),
+        );
+        try std.testing.expectEqual(result.topology.atoms[i].element, result2.topology.atoms[i].element);
+    }
+
+    // Residue names
+    for (0..result.topology.residues.len) |i| {
+        try std.testing.expectEqualStrings(
+            result.topology.residues[i].name.slice(),
+            result2.topology.residues[i].name.slice(),
+        );
+    }
 }
 
 test "parse 1l2y.pdb" {

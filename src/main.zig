@@ -70,6 +70,7 @@ pub fn main() !void {
         .omega => runners.runOmega(allocator, args),
         .chi => runners.runChi(allocator, args),
         .summary => runners.runSummary(allocator, args),
+        .convert => runners.runConvert(allocator, args),
     };
 
     result catch |err| {

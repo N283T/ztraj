@@ -36,6 +36,10 @@ ztraj rdf traj.xtc --top structure.pdb --sel1 "O" --sel2 "H" --rmax 8.0
 # GRO topology support
 ztraj rmsd traj.xtc --top structure.gro --select backbone --ref 0
 
+# Format conversion
+ztraj convert input.gro --output output.pdb
+ztraj convert input.pdb --output output.gro
+
 # Hydrogen bonds
 ztraj hbonds structure.pdb
 
@@ -45,7 +49,7 @@ ztraj rg traj.xtc --top structure.pdb --format csv --output rg.csv
 
 ### Available commands
 
-`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`, `summary`
+`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`, `summary`, `convert`
 
 ## Python bindings (pyztraj)
 

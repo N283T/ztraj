@@ -1384,3 +1384,44 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
 
     try flushOutput(buf.items, args.output_path);
 }
+
+// ============================================================================
+// Subcommand: convert
+// ============================================================================
+
+pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
+    const output_path = args.output_path orelse {
+        std.debug.print("error: convert requires --output <file>\n", .{});
+        std.process.exit(1);
+    };
+
+    // Load input
+    var parsed = try loader.loadTopology(allocator, args.traj_path);
+    defer parsed.deinit();
+
+    // Detect output format from extension and write
+    var buf = std.ArrayList(u8){};
+    defer buf.deinit(allocator);
+    const w = buf.writer(allocator);
+
+    if (loader.isPdb(output_path)) {
+        try ztraj.io.pdb.write(w, parsed.topology, parsed.frame);
+    } else if (loader.isGro(output_path)) {
+        try ztraj.io.gro.write(w, parsed.topology, parsed.frame);
+    } else {
+        std.debug.print(
+            "error: unsupported output format for '{s}' (supported: .pdb, .gro)\n",
+            .{output_path},
+        );
+        std.process.exit(1);
+    }
+
+    try flushOutput(buf.items, output_path);
+
+    std.debug.print("Converted {s} -> {s} ({d} atoms, {d} residues)\n", .{
+        args.traj_path,
+        output_path,
+        parsed.topology.atoms.len,
+        parsed.topology.residues.len,
+    });
+}
