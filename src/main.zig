@@ -69,6 +69,7 @@ pub fn main() !void {
         .psi => runners.runPsi(allocator, args),
         .omega => runners.runOmega(allocator, args),
         .chi => runners.runChi(allocator, args),
+        .summary => runners.runSummary(allocator, args),
     };
 
     result catch |err| {

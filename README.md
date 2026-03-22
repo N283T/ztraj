@@ -45,7 +45,7 @@ ztraj rg traj.xtc --top structure.pdb --format csv --output rg.csv
 
 ### Available commands
 
-`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`
+`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`, `summary`
 
 ## Python bindings (pyztraj)
 
