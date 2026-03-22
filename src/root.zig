@@ -41,6 +41,7 @@ pub const io = struct {
     pub const xtc = @import("io/xtc.zig");
     pub const trr = @import("io/trr.zig");
     pub const dcd = @import("io/dcd.zig");
+    pub const gro = @import("io/gro.zig");
 };
 
 pub const select = @import("select.zig");
@@ -53,4 +54,6 @@ test {
     // Use refAllDecls (non-recursive) to avoid pulling dssp's test suite
     // and pdb.zig's @embedFile path issues
     @import("std").testing.refAllDecls(@This());
+    // Explicitly pull in GRO parser tests (not reached by non-recursive refAllDecls)
+    _ = io.gro;
 }
