@@ -25,7 +25,8 @@ class Structure:
     residue_names: list[str]  # length n_atoms (per-atom)
     resids: NDArray[np.int32]  # (n_atoms,) per-atom residue IDs
     n_atoms: int
-    _pdb_path: str = ""  # internal: path for re-loading topology in analysis functions
+    _path: str = ""  # internal: path for re-loading topology in analysis functions
+    _loader: str = "ztraj_load_pdb"  # internal: C API function name for re-loading
 
 
 def _load_structure(load_fn, path: str | Path, label: str) -> Structure:
@@ -83,7 +84,8 @@ def _load_structure(load_fn, path: str | Path, label: str) -> Structure:
         residue_names=residue_names,
         resids=resids,
         n_atoms=n_atoms,
-        _pdb_path=str(path),
+        _path=str(path),
+        _loader=label.replace("load_", "ztraj_load_"),
     )
 
 

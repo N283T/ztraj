@@ -11,6 +11,7 @@ from pyztraj._ffi import get_ffi, get_lib
 from pyztraj._helpers import (
     _as_u32,
     _check,
+    _load_topology_handle,
     _pack_frames,
     _ptr_f32,
     _ptr_f64,
@@ -111,10 +112,7 @@ def detect_hbonds(
         msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
         raise ValueError(msg)
 
-    path_bytes = str(structure._pdb_path).encode("utf-8")
-    handle_ptr = ffi.new("void**")
-    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "detect_hbonds/load_pdb")
-    handle = handle_ptr[0]
+    handle = _load_topology_handle(structure, lib, ffi, "detect_hbonds/load_pdb")
 
     try:
         capacity = n_atoms * 4
@@ -212,10 +210,7 @@ def compute_contacts(
         msg = f"Unknown scheme '{scheme}'. Use one of: {list(scheme_map.keys())}"
         raise ValueError(msg)
 
-    path_bytes = str(structure._pdb_path).encode("utf-8")
-    handle_ptr = ffi.new("void**")
-    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "compute_contacts/load_pdb")
-    handle = handle_ptr[0]
+    handle = _load_topology_handle(structure, lib, ffi, "compute_contacts/load_pdb")
 
     try:
         n_residues = len(set(structure.resids.tolist()))
@@ -318,10 +313,7 @@ def compute_sasa(
         msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
         raise ValueError(msg)
 
-    path_bytes = str(structure._pdb_path).encode("utf-8")
-    handle_ptr = ffi.new("void**")
-    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "compute_sasa/load_pdb")
-    handle = handle_ptr[0]
+    handle = _load_topology_handle(structure, lib, ffi, "compute_sasa/load_pdb")
 
     try:
         atom_areas = np.empty(n_atoms, dtype=np.float64)

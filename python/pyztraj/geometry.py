@@ -10,6 +10,7 @@ from pyztraj._ffi import get_ffi, get_lib
 from pyztraj._helpers import (
     _as_u32,
     _check,
+    _load_topology_handle,
     _pack_frames,
     _ptr_f32,
     _ptr_f64,
@@ -507,10 +508,7 @@ def make_molecules_whole(
         raise ValueError(msg)
     box_flat = np.ascontiguousarray(box.reshape(9), dtype=np.float32)
 
-    path_bytes = str(structure._pdb_path).encode("utf-8")
-    handle_ptr = ffi.new("void**")
-    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), "make_molecules_whole/load_pdb")
-    handle = handle_ptr[0]
+    handle = _load_topology_handle(structure, lib, ffi, "make_molecules_whole")
 
     try:
         _check(
