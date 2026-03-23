@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-03-23
 
 ### Added
 - GRO (GROMACS) format support for topology and coordinate reading
@@ -9,8 +9,17 @@
   - Automatic nm-to-Angstrom unit conversion
 - `summary` CLI command: show structure/trajectory overview (atoms, residues, chains, box, elements)
 - `convert` CLI command: convert between structure and trajectory formats
-- PDB and GRO file writers for structure format conversion
-- XTC and TRR writers for trajectory format conversion (via zxdrfile v0.2.0)
+  - PDB and GRO file writers for structure format conversion
+  - XTC and TRR writers for trajectory format conversion (via zxdrfile v0.2.0)
+  - Auto-detects output format from file extension
+
+### Fixed
+- GRO element inference for ions and metals (Fe, Zn, Na, Cl, Mg, etc.)
+  - Uses residue name context to distinguish from protein atom names
+  - Supports GROMACS, CHARMM (SOD/CLA/POT), and AMBER naming conventions
+
+### Changed
+- Upgraded zxdrfile dependency from v0.1.1 to v0.2.0
 
 ## [0.3.0] - 2026-03-21
 
