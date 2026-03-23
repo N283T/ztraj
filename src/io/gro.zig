@@ -102,18 +102,97 @@ fn parseCoord(field: []const u8) ?f32 {
     return @floatCast(if (negative) -result else result);
 }
 
-/// Infer element from a trimmed GRO atom name (GRO has no element column).
-/// For single-character names (e.g. "N", "C", "O"), use the character directly.
-/// For multi-character names (e.g. "CA", "HB1"), use the first character
-/// unless it is a digit (e.g. "1HB" → "H").
-fn inferElement(atom_name: []const u8) elem.Element {
+/// Known ion atom-name → element mappings for CHARMM/AMBER/GROMACS force fields.
+/// Maps atom names that would be misidentified by first-character heuristics.
+const IonMapping = struct { atom: []const u8, element: elem.Element };
+const ion_table = [_]IonMapping{
+    // Standard GROMACS naming (atom name = residue name)
+    .{ .atom = "FE", .element = .Fe },
+    .{ .atom = "ZN", .element = .Zn },
+    .{ .atom = "MG", .element = .Mg },
+    .{ .atom = "MN", .element = .Mn },
+    .{ .atom = "CO", .element = .Co },
+    .{ .atom = "NI", .element = .Ni },
+    .{ .atom = "CU", .element = .Cu },
+    .{ .atom = "NA", .element = .Na },
+    .{ .atom = "CL", .element = .Cl },
+    .{ .atom = "CA", .element = .Ca },
+    .{ .atom = "LI", .element = .Li },
+    .{ .atom = "BR", .element = .Br },
+    .{ .atom = "AL", .element = .Al },
+    .{ .atom = "SI", .element = .Si },
+};
+
+/// Known ion residue names across force fields (CHARMM, AMBER, GROMACS, OPLS).
+/// Used to identify residues that contain ionic/metallic atoms.
+fn isIonResidue(res_name: []const u8) bool {
+    const ion_residues = [_][]const u8{
+        // GROMACS standard
+        "FE",  "FE2", "ZN",  "ZN2", "MG",  "MN",  "CO",  "NI",  "CU",  "CU1",
+        "NA",  "NA+", "CL",  "CL-", "CA",  "CA2", "LI",  "LI+", "BR",  "BR-",
+        "AL",  "K",   "K+",  "RB",
+        // CHARMM naming
+         "SOD", "CLA", "POT", "CAL", "MG2", "ZN2",
+        "FE2", "CES", "BAR", "LIT",
+        // AMBER naming
+        "Na+", "Cl-", "K+",  "Mg+",
+    };
+    for (ion_residues) |ir| {
+        if (eqlCI(res_name, ir)) return true;
+    }
+    return false;
+}
+
+/// Case-insensitive string equality.
+fn eqlCI(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |ca, cb| {
+        if (std.ascii.toUpper(ca) != std.ascii.toUpper(cb)) return false;
+    }
+    return true;
+}
+
+/// Infer element from a trimmed GRO atom name and residue name.
+/// GRO has no element column, so we use heuristics:
+///
+/// 1. Single-character names ("N", "C", "O") → use directly.
+/// 2. Digit-prefixed names ("1HB") → use second character.
+/// 3. Atom name is in the ion lookup table AND residue is a known ion residue →
+///    use the mapped element (handles both GROMACS and CHARMM naming).
+/// 4. Otherwise → use first character as 1-char element.
+fn inferElement(atom_name: []const u8, res_name: []const u8) elem.Element {
     if (atom_name.len == 0) return .X;
     if (atom_name.len == 1) return elem.fromSymbol(atom_name);
+
     const first = atom_name[0];
     const second = atom_name[1];
+
+    // Digit-prefixed names (e.g. "1HB" → H)
     if (first >= '0' and first <= '9') {
         return elem.fromSymbol(&[_]u8{second});
     }
+
+    // Check ion table: atom name must match AND residue must be ion-like
+    if (std.ascii.isAlphabetic(second) and isIonResidue(res_name)) {
+        // Extract alphabetic prefix (strip trailing digits)
+        var alpha_len: usize = 0;
+        for (atom_name) |c| {
+            if (std.ascii.isAlphabetic(c)) alpha_len += 1 else break;
+        }
+        if (alpha_len == 2) {
+            const upper: [2]u8 = .{
+                std.ascii.toUpper(first),
+                std.ascii.toUpper(second),
+            };
+            for (ion_table) |entry| {
+                if (entry.atom[0] == upper[0] and entry.atom[1] == upper[1]) {
+                    return entry.element;
+                }
+            }
+        }
+    }
+
+    // Default: first character as element symbol
     return elem.fromSymbol(&[_]u8{first});
 }
 
@@ -268,7 +347,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
         const y_nm = parseCoord(y_field) orelse return ParseError.InvalidFormat;
         const z_nm = parseCoord(z_field) orelse return ParseError.InvalidFormat;
 
-        const element = inferElement(atom_name);
+        const element = inferElement(atom_name, res_name);
 
         raw_atoms.appendAssumeCapacity(RawAtom{
             .name = types.FixedString(4).fromSlice(atom_name),
@@ -671,6 +750,54 @@ test "parse GRO element inference" {
     try std.testing.expectEqual(elem_mod.Element.C, result.topology.atoms[1].element);
     try std.testing.expectEqual(elem_mod.Element.O, result.topology.atoms[2].element);
     try std.testing.expectEqual(elem_mod.Element.H, result.topology.atoms[3].element);
+}
+
+test "parse GRO ion and metal element inference" {
+    const data =
+        \\Ion test
+        \\    5
+        \\    1 FE     FE    1   0.100   0.200   0.300
+        \\    2 ZN     ZN    2   0.400   0.500   0.600
+        \\    3 NA     NA    3   0.700   0.800   0.900
+        \\    4 CL     CL    4   1.000   1.100   1.200
+        \\    5ALA     CA    5   1.300   1.400   1.500
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    // FE in residue FE → iron (not fluorine)
+    try std.testing.expectEqual(elem.Element.Fe, result.topology.atoms[0].element);
+    // ZN in residue ZN → zinc
+    try std.testing.expectEqual(elem.Element.Zn, result.topology.atoms[1].element);
+    // NA in residue NA → sodium (not nitrogen)
+    try std.testing.expectEqual(elem.Element.Na, result.topology.atoms[2].element);
+    // CL in residue CL → chlorine (not carbon)
+    try std.testing.expectEqual(elem.Element.Cl, result.topology.atoms[3].element);
+    // CA in residue ALA → carbon (not calcium, because ALA is not an ion residue)
+    try std.testing.expectEqual(elem.Element.C, result.topology.atoms[4].element);
+}
+
+test "parse GRO CHARMM ion naming" {
+    const data =
+        \\CHARMM ions
+        \\    3
+        \\    1SOD     NA    1   0.100   0.200   0.300
+        \\    2CLA     CL    2   0.400   0.500   0.600
+        \\    3POT      K    3   0.700   0.800   0.900
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    // NA in residue SOD → sodium (CHARMM naming)
+    try std.testing.expectEqual(elem.Element.Na, result.topology.atoms[0].element);
+    // CL in residue CLA → chlorine (CHARMM naming)
+    try std.testing.expectEqual(elem.Element.Cl, result.topology.atoms[1].element);
+    // K in residue POT → potassium (single char, works directly)
+    try std.testing.expectEqual(elem.Element.K, result.topology.atoms[2].element);
 }
 
 test "parse GRO without time in title" {
