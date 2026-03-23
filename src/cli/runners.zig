@@ -1414,6 +1414,11 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
             allocator.free(frames);
         }
 
+        if (frames.len == 0) {
+            std.debug.print("error: no frames found in '{s}'\n", .{args.traj_path});
+            std.process.exit(1);
+        }
+
         if (loader.isXtc(output_path)) {
             var writer = try ztraj.io.xtc.XtcWriter.open(allocator, output_path, n_atoms);
             defer writer.deinit();

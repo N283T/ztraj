@@ -144,12 +144,10 @@ pub const TrrWriter = struct {
     inner: TrrWriterInner,
     coords_buf: []f32,
     allocator: std.mem.Allocator,
+    closed: bool = false,
 
     const Self = @This();
 
-    /// Open a TRR file for writing.
-    ///
-    /// Allocates an internal AOS conversion buffer sized to n_atoms * 3.
     pub fn open(allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
         const natoms_i: i32 = @intCast(n_atoms);
         var inner = try TrrWriterInner.open(allocator, path, natoms_i, .write);
@@ -158,10 +156,7 @@ pub const TrrWriter = struct {
         return Self{ .inner = inner, .coords_buf = coords_buf, .allocator = allocator };
     }
 
-    /// Write a single frame.
-    ///
-    /// Converts SOA angstroms to AOS nanometers and box vectors from angstroms to nm.
-    /// Velocities and forces are not written.
+    /// Convert a ztraj Frame (Å, SOA) to TRR format (nm, AOS) and write it.
     pub fn writeFrame(self: *Self, frame: types.Frame) !void {
         const n = frame.x.len;
         for (0..n) |i| {
@@ -192,19 +187,24 @@ pub const TrrWriter = struct {
     }
 
     /// Flush and close the file, then free all resources.
-    /// After close(), the writer must not be used again.
     pub fn close(self: *Self) !void {
-        self.allocator.free(self.coords_buf);
-        self.coords_buf = &.{};
+        defer {
+            self.allocator.free(self.coords_buf);
+            self.coords_buf = &.{};
+            self.closed = true;
+        }
         try self.inner.close();
     }
 
-    /// Free the conversion buffer only (does NOT close the inner writer).
-    /// Use when close() has already been called, or as errdefer cleanup.
+    /// Best-effort cleanup. Frees buffer and closes inner if not already closed.
     pub fn deinit(self: *Self) void {
         if (self.coords_buf.len > 0) {
             self.allocator.free(self.coords_buf);
             self.coords_buf = &.{};
+        }
+        if (!self.closed) {
+            self.inner.close() catch {};
+            self.closed = true;
         }
     }
 };
