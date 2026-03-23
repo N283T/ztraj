@@ -10,6 +10,7 @@ const types = @import("../types.zig");
 const zxdrfile = @import("zxdrfile");
 
 const XtcReaderInner = zxdrfile.XtcReader;
+const XtcWriterInner = zxdrfile.XtcWriter;
 const XtcError = zxdrfile.XtcError;
 
 pub const XtcReadError = error{
@@ -122,6 +123,82 @@ pub const XtcReader = struct {
     /// Number of atoms in the trajectory.
     pub fn nAtoms(self: *const Self) u32 {
         return @intCast(self.inner.natoms);
+    }
+};
+
+/// Streaming XTC writer that writes one Frame at a time.
+///
+/// Usage:
+///
+///   var writer = try XtcWriter.open(allocator, "trajectory.xtc", n_atoms);
+///   defer writer.deinit();
+///
+///   try writer.writeFrame(frame);
+///   try writer.close();
+///
+/// Coordinates are expected in angstroms and are converted to nanometers
+/// (/ 10.0) before writing. Box vectors are also converted from angstroms to nm.
+pub const XtcWriter = struct {
+    inner: XtcWriterInner,
+    coords_buf: []f32,
+    allocator: std.mem.Allocator,
+    closed: bool = false,
+
+    const Self = @This();
+
+    pub fn open(allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
+        const natoms_i: i32 = @intCast(n_atoms);
+        var inner = try XtcWriterInner.open(allocator, path, natoms_i, .write);
+        errdefer inner.close() catch {};
+        const coords_buf = try allocator.alloc(f32, n_atoms * 3);
+        return Self{ .inner = inner, .coords_buf = coords_buf, .allocator = allocator };
+    }
+
+    /// Convert a ztraj Frame (Å, SOA) to XTC format (nm, AOS) and write it.
+    pub fn writeFrame(self: *Self, frame: types.Frame) !void {
+        const n = frame.x.len;
+        for (0..n) |i| {
+            self.coords_buf[i * 3 + 0] = frame.x[i] / 10.0;
+            self.coords_buf[i * 3 + 1] = frame.y[i] / 10.0;
+            self.coords_buf[i * 3 + 2] = frame.z[i] / 10.0;
+        }
+        var box: [3][3]f32 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } };
+        if (frame.box_vectors) |bv| {
+            for (0..3) |r| {
+                for (0..3) |c| {
+                    box[r][c] = bv[r][c] / 10.0;
+                }
+            }
+        }
+        try self.inner.writeFrame(.{
+            .step = frame.step,
+            .time = frame.time,
+            .box = box,
+            .coords = self.coords_buf,
+            .precision = 1000.0,
+        });
+    }
+
+    /// Flush and close the file, then free all resources.
+    pub fn close(self: *Self) !void {
+        defer {
+            self.allocator.free(self.coords_buf);
+            self.coords_buf = &.{};
+            self.closed = true;
+        }
+        try self.inner.close();
+    }
+
+    /// Best-effort cleanup. Frees buffer and closes inner if not already closed.
+    pub fn deinit(self: *Self) void {
+        if (self.coords_buf.len > 0) {
+            self.allocator.free(self.coords_buf);
+            self.coords_buf = &.{};
+        }
+        if (!self.closed) {
+            self.inner.close() catch {};
+            self.closed = true;
+        }
     }
 };
 

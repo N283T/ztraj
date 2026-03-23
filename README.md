@@ -36,9 +36,13 @@ ztraj rdf traj.xtc --top structure.pdb --sel1 "O" --sel2 "H" --rmax 8.0
 # GRO topology support
 ztraj rmsd traj.xtc --top structure.gro --select backbone --ref 0
 
-# Format conversion
+# Format conversion (structure)
 ztraj convert input.gro --output output.pdb
 ztraj convert input.pdb --output output.gro
+
+# Trajectory conversion
+ztraj convert traj.xtc --top structure.pdb --output traj.trr
+ztraj convert traj.trr --top structure.gro --output traj.xtc
 
 # Hydrogen bonds
 ztraj hbonds structure.pdb
