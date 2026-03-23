@@ -132,7 +132,8 @@ fn isIonResidue(res_name: []const u8) bool {
         "NA",  "NA+", "CL",  "CL-", "CA",  "CA2", "LI",  "LI+", "BR",  "BR-",
         "AL",  "K",   "K+",  "RB",
         // CHARMM naming
-        "SOD", "CLA", "POT", "CAL", "MG2", "ZN2", "FE2", "CES", "BAR", "LIT",
+         "SOD", "CLA", "POT", "CAL", "MG2", "ZN2",
+        "FE2", "CES", "BAR", "LIT",
         // AMBER naming
         "Na+", "Cl-", "K+",  "Mg+",
     };
