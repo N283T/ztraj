@@ -102,18 +102,56 @@ fn parseCoord(field: []const u8) ?f32 {
     return @floatCast(if (negative) -result else result);
 }
 
-/// Infer element from a trimmed GRO atom name (GRO has no element column).
-/// For single-character names (e.g. "N", "C", "O"), use the character directly.
-/// For multi-character names (e.g. "CA", "HB1"), use the first character
-/// unless it is a digit (e.g. "1HB" → "H").
-fn inferElement(atom_name: []const u8) elem.Element {
+/// Infer element from a trimmed GRO atom name and residue name.
+/// GRO has no element column, so we use heuristics:
+///
+/// 1. Single-character names ("N", "C", "O") → use directly.
+/// 2. Atom name matches a known ion/metal residue name → try 2-char element
+///    (e.g. atom "FE" in residue "FE" → iron, atom "NA" in residue "NA+" → sodium).
+/// 3. Atom name stripped of digits is a valid 2-char element AND residue is
+///    an ion-like residue (1-4 chars, uppercase, not a standard amino acid) →
+///    try 2-char element.
+/// 4. Otherwise → use first non-digit character as 1-char element.
+fn inferElement(atom_name: []const u8, res_name: []const u8) elem.Element {
     if (atom_name.len == 0) return .X;
     if (atom_name.len == 1) return elem.fromSymbol(atom_name);
+
     const first = atom_name[0];
     const second = atom_name[1];
+
+    // Digit-prefixed names (e.g. "1HB" → H)
     if (first >= '0' and first <= '9') {
         return elem.fromSymbol(&[_]u8{second});
     }
+
+    // Try 2-char element lookup when atom name matches residue name
+    // (common for ions: FE in FE, NA in NA/NA+, CL in CL/CL-, ZN in ZN, etc.)
+    if (atom_name.len <= 4 and std.ascii.isAlphabetic(first) and std.ascii.isAlphabetic(second)) {
+        // Strip trailing digits from atom name for element lookup
+        var alpha_len: usize = 0;
+        for (atom_name) |c| {
+            if (std.ascii.isAlphabetic(c)) {
+                alpha_len += 1;
+            } else break;
+        }
+        const alpha_part = atom_name[0..alpha_len];
+
+        if (alpha_part.len == 2) {
+            // Check if residue name starts with the same 2 chars (case-insensitive)
+            // e.g. atom "FE" in residue "FE", atom "NA" in residue "NA+"
+            const res_match = res_name.len >= 2 and
+                std.ascii.toUpper(res_name[0]) == std.ascii.toUpper(alpha_part[0]) and
+                std.ascii.toUpper(res_name[1]) == std.ascii.toUpper(alpha_part[1]);
+
+            if (res_match) {
+                // Try as 2-char element symbol
+                const two_char = elem.fromSymbol(alpha_part);
+                if (two_char != .X) return two_char;
+            }
+        }
+    }
+
+    // Default: first character as element symbol
     return elem.fromSymbol(&[_]u8{first});
 }
 
@@ -268,7 +306,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
         const y_nm = parseCoord(y_field) orelse return ParseError.InvalidFormat;
         const z_nm = parseCoord(z_field) orelse return ParseError.InvalidFormat;
 
-        const element = inferElement(atom_name);
+        const element = inferElement(atom_name, res_name);
 
         raw_atoms.appendAssumeCapacity(RawAtom{
             .name = types.FixedString(4).fromSlice(atom_name),
@@ -671,6 +709,33 @@ test "parse GRO element inference" {
     try std.testing.expectEqual(elem_mod.Element.C, result.topology.atoms[1].element);
     try std.testing.expectEqual(elem_mod.Element.O, result.topology.atoms[2].element);
     try std.testing.expectEqual(elem_mod.Element.H, result.topology.atoms[3].element);
+}
+
+test "parse GRO ion and metal element inference" {
+    const data =
+        \\Ion test
+        \\    5
+        \\    1 FE     FE    1   0.100   0.200   0.300
+        \\    2 ZN     ZN    2   0.400   0.500   0.600
+        \\    3 NA     NA    3   0.700   0.800   0.900
+        \\    4 CL     CL    4   1.000   1.100   1.200
+        \\    5ALA     CA    5   1.300   1.400   1.500
+        \\   1.000   1.000   1.000
+    ;
+    const allocator = std.testing.allocator;
+    var result = try parse(allocator, data);
+    defer result.deinit();
+
+    // FE in residue FE → iron (not fluorine)
+    try std.testing.expectEqual(elem.Element.Fe, result.topology.atoms[0].element);
+    // ZN in residue ZN → zinc
+    try std.testing.expectEqual(elem.Element.Zn, result.topology.atoms[1].element);
+    // NA in residue NA → sodium (not nitrogen)
+    try std.testing.expectEqual(elem.Element.Na, result.topology.atoms[2].element);
+    // CL in residue CL → chlorine (not carbon)
+    try std.testing.expectEqual(elem.Element.Cl, result.topology.atoms[3].element);
+    // CA in residue ALA → carbon (not calcium, because ALA != CA)
+    try std.testing.expectEqual(elem.Element.C, result.topology.atoms[4].element);
 }
 
 test "parse GRO without time in title" {
