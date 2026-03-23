@@ -16,7 +16,11 @@ const center_mod = @import("geometry/center.zig");
 const inertia_mod = @import("geometry/inertia.zig");
 const rmsf_mod = @import("geometry/rmsf.zig");
 const pdb_mod = @import("io/pdb.zig");
+const gro_mod = @import("io/gro.zig");
+const mmcif_mod = @import("io/mmcif.zig");
 const xtc_mod = @import("io/xtc.zig");
+const trr_mod = @import("io/trr.zig");
+const dcd_mod = @import("io/dcd.zig");
 const hbonds_mod = @import("analysis/hbonds.zig");
 const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
@@ -47,7 +51,7 @@ pub const ZTRAJ_ERROR_EOF: c_int = -5;
 // Version
 // =============================================================================
 
-const VERSION: [*:0]const u8 = "0.3.0";
+const VERSION: [*:0]const u8 = "0.4.0";
 
 /// Get the library version string.
 export fn ztraj_version() callconv(.c) [*:0]const u8 {
@@ -631,6 +635,84 @@ export fn ztraj_free_structure(handle: ?*anyopaque) callconv(.c) void {
     h.deinit();
 }
 
+/// Load a GRO file and return an opaque structure handle.
+///
+/// On success, `handle_out` is set to a non-null opaque pointer.
+/// The handle must be freed with ztraj_free_structure().
+export fn ztraj_load_gro(
+    path: [*:0]const u8,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    defer c_allocator.free(data);
+
+    var parse_result = gro_mod.parse(c_allocator, data) catch {
+        return ZTRAJ_ERROR_PARSE;
+    };
+    errdefer parse_result.deinit();
+
+    const masses = parse_result.topology.masses(c_allocator) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    errdefer c_allocator.free(masses);
+
+    const handle = c_allocator.create(StructureHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .parse_result = parse_result,
+        .masses = masses,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Load an mmCIF file and return an opaque structure handle.
+///
+/// On success, `handle_out` is set to a non-null opaque pointer.
+/// The handle must be freed with ztraj_free_structure().
+export fn ztraj_load_mmcif(
+    path: [*:0]const u8,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    defer c_allocator.free(data);
+
+    var parse_result = mmcif_mod.parse(c_allocator, data) catch {
+        return ZTRAJ_ERROR_PARSE;
+    };
+    errdefer parse_result.deinit();
+
+    const masses = parse_result.topology.masses(c_allocator) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    errdefer c_allocator.free(masses);
+
+    const handle = c_allocator.create(StructureHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .parse_result = parse_result,
+        .masses = masses,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
 // =============================================================================
 // I/O: XTC Streaming Reader (opaque handle)
 // =============================================================================
@@ -724,6 +806,215 @@ export fn ztraj_read_xtc_frame(
 /// Close an XTC reader handle. Safe to call with null.
 export fn ztraj_close_xtc(handle: ?*anyopaque) callconv(.c) void {
     const h = castXtcHandle(handle) orelse return;
+    h.deinit();
+}
+
+// =============================================================================
+// I/O: TRR Streaming Reader (opaque handle)
+// =============================================================================
+
+const TRR_MAGIC: u64 = 0xD1CE_8765_4321_CAFE;
+
+/// Opaque TRR reader handle.
+const TrrHandle = struct {
+    magic: u64 = TRR_MAGIC,
+    reader: trr_mod.TrrReader,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *TrrHandle) void {
+        self.magic = 0;
+        self.reader.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+/// Validate and cast a TRR handle. Returns null if invalid.
+fn castTrrHandle(handle: ?*anyopaque) ?*TrrHandle {
+    const h: *TrrHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != TRR_MAGIC) return null;
+    return h;
+}
+
+/// Open a TRR file for streaming frame-by-frame reading.
+///
+/// `n_atoms_out` receives the number of atoms per frame.
+/// The handle must be closed with ztraj_close_trr().
+export fn ztraj_open_trr(
+    path: [*:0]const u8,
+    n_atoms_out: *usize,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    var reader = trr_mod.TrrReader.open(c_allocator, path_slice) catch |err| {
+        return switch (err) {
+            trr_mod.TrrReadError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
+            trr_mod.TrrReadError.InvalidMagic, trr_mod.TrrReadError.InvalidHeader => ZTRAJ_ERROR_PARSE,
+            trr_mod.TrrReadError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+    errdefer reader.deinit();
+
+    n_atoms_out.* = reader.frame.nAtoms();
+
+    const handle = c_allocator.create(TrrHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .reader = reader,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Read the next TRR frame into caller-owned buffers.
+///
+/// Returns ZTRAJ_OK on success, ZTRAJ_ERROR_EOF at end of file.
+/// Coordinates are in angstroms (converted from nm at read time).
+/// `x`, `y`, `z` must have at least n_atoms elements.
+export fn ztraj_read_trr_frame(
+    handle: ?*anyopaque,
+    x: [*]f32,
+    y: [*]f32,
+    z: [*]f32,
+    time: *f32,
+    step: *i32,
+) callconv(.c) c_int {
+    const h = castTrrHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const frame_ptr = h.reader.next() catch |err| {
+        return switch (err) {
+            trr_mod.TrrReadError.InvalidMagic, trr_mod.TrrReadError.InvalidHeader => ZTRAJ_ERROR_PARSE,
+            trr_mod.TrrReadError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+
+    if (frame_ptr) |frame| {
+        const n = frame.nAtoms();
+        @memcpy(x[0..n], frame.x);
+        @memcpy(y[0..n], frame.y);
+        @memcpy(z[0..n], frame.z);
+        time.* = frame.time;
+        step.* = frame.step;
+        return ZTRAJ_OK;
+    } else {
+        return ZTRAJ_ERROR_EOF;
+    }
+}
+
+/// Close a TRR reader handle. Safe to call with null.
+export fn ztraj_close_trr(handle: ?*anyopaque) callconv(.c) void {
+    const h = castTrrHandle(handle) orelse return;
+    h.deinit();
+}
+
+// =============================================================================
+// I/O: DCD Streaming Reader (opaque handle)
+// =============================================================================
+
+const DCD_MAGIC: u64 = 0xDCDC_DCDC_DCDC_DCDC;
+
+/// Opaque DCD reader handle.
+const DcdHandle = struct {
+    magic: u64 = DCD_MAGIC,
+    reader: dcd_mod.DcdReader,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *DcdHandle) void {
+        self.magic = 0;
+        self.reader.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+/// Validate and cast a DCD handle. Returns null if invalid.
+fn castDcdHandle(handle: ?*anyopaque) ?*DcdHandle {
+    const h: *DcdHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != DCD_MAGIC) return null;
+    return h;
+}
+
+/// Open a DCD file for streaming frame-by-frame reading.
+///
+/// `n_atoms_out` receives the number of atoms per frame.
+/// The handle must be closed with ztraj_close_dcd().
+export fn ztraj_open_dcd(
+    path: [*:0]const u8,
+    n_atoms_out: *usize,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    var reader = dcd_mod.DcdReader.open(c_allocator, path_slice) catch |err| {
+        return switch (err) {
+            dcd_mod.DcdError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
+            dcd_mod.DcdError.InvalidMagic, dcd_mod.DcdError.BadFormat => ZTRAJ_ERROR_PARSE,
+            dcd_mod.DcdError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            dcd_mod.DcdError.FixedAtomsNotSupported => ZTRAJ_ERROR_PARSE,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+    errdefer reader.deinit();
+
+    n_atoms_out.* = reader.nAtoms();
+
+    const handle = c_allocator.create(DcdHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .reader = reader,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Read the next DCD frame into caller-owned buffers.
+///
+/// Returns ZTRAJ_OK on success, ZTRAJ_ERROR_EOF at end of file.
+/// Coordinates are in angstroms (DCD native units, no conversion needed).
+/// `x`, `y`, `z` must have at least n_atoms elements.
+export fn ztraj_read_dcd_frame(
+    handle: ?*anyopaque,
+    x: [*]f32,
+    y: [*]f32,
+    z: [*]f32,
+    time: *f32,
+    step: *i32,
+) callconv(.c) c_int {
+    const h = castDcdHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const frame_ptr = h.reader.next() catch |err| {
+        return switch (err) {
+            dcd_mod.DcdError.InvalidMagic, dcd_mod.DcdError.BadFormat => ZTRAJ_ERROR_PARSE,
+            dcd_mod.DcdError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+
+    if (frame_ptr) |frame| {
+        const n = frame.nAtoms();
+        @memcpy(x[0..n], frame.x);
+        @memcpy(y[0..n], frame.y);
+        @memcpy(z[0..n], frame.z);
+        time.* = frame.time;
+        step.* = frame.step;
+        return ZTRAJ_OK;
+    } else {
+        return ZTRAJ_ERROR_EOF;
+    }
+}
+
+/// Close a DCD reader handle. Safe to call with null.
+export fn ztraj_close_dcd(handle: ?*anyopaque) callconv(.c) void {
+    const h = castDcdHandle(handle) orelse return;
     h.deinit();
 }
 
