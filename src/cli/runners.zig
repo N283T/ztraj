@@ -1395,33 +1395,86 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
         std.process.exit(1);
     };
 
-    // Load input
-    var parsed = try loader.loadTopology(allocator, args.traj_path);
-    defer parsed.deinit();
+    const is_traj_output = loader.isXtc(output_path) or loader.isTrr(output_path);
+    const is_traj_input = loader.isXtc(args.traj_path) or
+        loader.isTrr(args.traj_path) or loader.isDcd(args.traj_path);
 
-    // Detect output format from extension and write
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    // Trajectory conversion: read all frames, write to trajectory format
+    if (is_traj_output or is_traj_input) {
+        // Need topology for atom count
+        const top_path = args.top_path orelse args.traj_path;
+        var parsed = try loader.loadTopology(allocator, top_path);
+        defer parsed.deinit();
+        const n_atoms = parsed.topology.atoms.len;
 
-    if (loader.isPdb(output_path)) {
-        try ztraj.io.pdb.write(w, parsed.topology, parsed.frame);
-    } else if (loader.isGro(output_path)) {
-        try ztraj.io.gro.write(w, parsed.topology, parsed.frame);
+        // Load all frames from input
+        const frames = try loader.loadAllFrames(allocator, args.traj_path, n_atoms);
+        defer {
+            for (frames) |*f| @constCast(f).deinit();
+            allocator.free(frames);
+        }
+
+        if (loader.isXtc(output_path)) {
+            var writer = try ztraj.io.xtc.XtcWriter.open(allocator, output_path, n_atoms);
+            defer writer.deinit();
+            for (frames) |frame| try writer.writeFrame(frame);
+            try writer.close();
+        } else if (loader.isTrr(output_path)) {
+            var writer = try ztraj.io.trr.TrrWriter.open(allocator, output_path, n_atoms);
+            defer writer.deinit();
+            for (frames) |frame| try writer.writeFrame(frame);
+            try writer.close();
+        } else if (loader.isPdb(output_path)) {
+            // Trajectory → single-structure: write first frame only
+            var buf = std.ArrayList(u8){};
+            defer buf.deinit(allocator);
+            if (frames.len > 0) {
+                try ztraj.io.pdb.write(buf.writer(allocator), parsed.topology, frames[0]);
+            }
+            try flushOutput(buf.items, output_path);
+        } else if (loader.isGro(output_path)) {
+            var buf = std.ArrayList(u8){};
+            defer buf.deinit(allocator);
+            if (frames.len > 0) {
+                try ztraj.io.gro.write(buf.writer(allocator), parsed.topology, frames[0]);
+            }
+            try flushOutput(buf.items, output_path);
+        } else {
+            std.debug.print(
+                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr)\n",
+                .{output_path},
+            );
+            std.process.exit(1);
+        }
+
+        std.debug.print("Converted {s} -> {s} ({d} atoms, {d} frames)\n", .{
+            args.traj_path, output_path, n_atoms, frames.len,
+        });
     } else {
-        std.debug.print(
-            "error: unsupported output format for '{s}' (supported: .pdb, .gro)\n",
-            .{output_path},
-        );
-        std.process.exit(1);
+        // Structure-only conversion (PDB/GRO/mmCIF → PDB/GRO)
+        var parsed = try loader.loadTopology(allocator, args.traj_path);
+        defer parsed.deinit();
+
+        var buf = std.ArrayList(u8){};
+        defer buf.deinit(allocator);
+        const w = buf.writer(allocator);
+
+        if (loader.isPdb(output_path)) {
+            try ztraj.io.pdb.write(w, parsed.topology, parsed.frame);
+        } else if (loader.isGro(output_path)) {
+            try ztraj.io.gro.write(w, parsed.topology, parsed.frame);
+        } else {
+            std.debug.print(
+                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr)\n",
+                .{output_path},
+            );
+            std.process.exit(1);
+        }
+
+        try flushOutput(buf.items, output_path);
+
+        std.debug.print("Converted {s} -> {s} ({d} atoms, {d} residues)\n", .{
+            args.traj_path, output_path, parsed.topology.atoms.len, parsed.topology.residues.len,
+        });
     }
-
-    try flushOutput(buf.items, output_path);
-
-    std.debug.print("Converted {s} -> {s} ({d} atoms, {d} residues)\n", .{
-        args.traj_path,
-        output_path,
-        parsed.topology.atoms.len,
-        parsed.topology.residues.len,
-    });
 }

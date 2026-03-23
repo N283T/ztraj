@@ -183,16 +183,21 @@ pub const XtcWriter = struct {
         });
     }
 
-    /// Flush and close the underlying file, then free the conversion buffer.
+    /// Flush and close the file, then free all resources.
+    /// After close(), the writer must not be used again.
     pub fn close(self: *Self) !void {
         self.allocator.free(self.coords_buf);
+        self.coords_buf = &.{};
         try self.inner.close();
     }
 
-    /// Free all resources. Silently ignores close errors.
+    /// Free the conversion buffer only (does NOT close the inner writer).
+    /// Use when close() has already been called, or as errdefer cleanup.
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.coords_buf);
-        self.inner.close() catch {};
+        if (self.coords_buf.len > 0) {
+            self.allocator.free(self.coords_buf);
+            self.coords_buf = &.{};
+        }
     }
 };
 

@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .zxdrfile = .{
-            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.1.1#ef0e63dfd74eae5f3a0b49d19fac002989c0a351",
-            .hash = "zxdrfile-0.1.1-JIaQ9ir5AACu7dbzJDk9taGRu7tRROckg6kClL58b9dP",
+            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.2.0#4f6b7853efc747a3ac7d7c94bb4302114b12c916",
+            .hash = "zxdrfile-0.2.0-JIaQ9hMJAgCg3RxOMkEd_n0mQX_MBry33wBKhZ7I1kwm",
         },
         .zsasa = .{
             .url = "git+https://github.com/N283T/freesasa-zig.git#f76cafbf4f774531f291f8778552ba513bb03e5d",
