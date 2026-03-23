@@ -232,6 +232,8 @@ class _TrajectoryReader:
         handle_ptr = self._ffi.new("void**")
         _check(self._open_fn(self._path, n_atoms_out, handle_ptr), self._label)
         self._handle = handle_ptr[0]
+        if self._handle == self._ffi.NULL:
+            raise ZtrajError(f"{self._label}: returned success but handle is null")
         self._n_atoms = n_atoms_out[0]
 
         if self._n_atoms != self._expected_n_atoms:
@@ -268,6 +270,10 @@ class _TrajectoryReader:
         if rc == self._lib.ZTRAJ_ERROR_EOF:
             raise StopIteration
 
+        if rc != 0:
+            # Close handle on read error to prevent broken-stream iteration
+            self._close_fn(self._handle)
+            self._handle = None
         _check(rc, f"read_{self._label}_frame")
 
         coords = np.column_stack([x, y, z])
