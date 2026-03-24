@@ -62,8 +62,10 @@ _CDEF = """
                    const uint32_t* atom_indices, size_t n_indices,
                    double* result);
 
-    // I/O: PDB
+    // I/O: Structure loaders (PDB, GRO, mmCIF)
     int ztraj_load_pdb(const char* path, void** handle_out);
+    int ztraj_load_gro(const char* path, void** handle_out);
+    int ztraj_load_mmcif(const char* path, void** handle_out);
     size_t ztraj_get_n_atoms(void* handle);
     int ztraj_get_coords(void* handle, float* x, float* y, float* z);
     int ztraj_get_masses(void* handle, double* masses);
@@ -77,6 +79,18 @@ _CDEF = """
     int ztraj_read_xtc_frame(void* handle, float* x, float* y, float* z,
                              float* time, int32_t* step);
     void ztraj_close_xtc(void* handle);
+
+    // I/O: TRR
+    int ztraj_open_trr(const char* path, size_t* n_atoms_out, void** handle_out);
+    int ztraj_read_trr_frame(void* handle, float* x, float* y, float* z,
+                             float* time, int32_t* step);
+    void ztraj_close_trr(void* handle);
+
+    // I/O: DCD
+    int ztraj_open_dcd(const char* path, size_t* n_atoms_out, void** handle_out);
+    int ztraj_read_dcd_frame(void* handle, float* x, float* y, float* z,
+                             float* time, int32_t* step);
+    void ztraj_close_dcd(void* handle);
 
     // Analysis: RDF
     int ztraj_rdf(const float* sel1_x, const float* sel1_y, const float* sel1_z,

@@ -71,6 +71,19 @@ def _ptr_i32(arr: NDArray[np.int32]):
     return get_ffi().cast("int32_t*", arr.ctypes.data)
 
 
+def _load_topology_handle(structure, lib, ffi, operation: str = ""):
+    """Re-load topology from a Structure's source file, returning an opaque handle.
+
+    Uses the correct loader function based on the original file format.
+    Caller must free the handle with lib.ztraj_free_structure().
+    """
+    path_bytes = str(structure._path).encode("utf-8")
+    handle_ptr = ffi.new("void**")
+    load_fn = getattr(lib, structure._loader)
+    _check(load_fn(path_bytes, handle_ptr), operation)
+    return handle_ptr[0]
+
+
 def _pack_frames(
     frames: list[NDArray[np.float32]],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, int]:

@@ -1,4 +1,4 @@
-"""I/O functions: PDB loading and XTC streaming."""
+"""I/O functions: structure loading (PDB, GRO, mmCIF) and trajectory streaming (XTC, TRR, DCD)."""
 
 from __future__ import annotations
 
@@ -25,28 +25,22 @@ class Structure:
     residue_names: list[str]  # length n_atoms (per-atom)
     resids: NDArray[np.int32]  # (n_atoms,) per-atom residue IDs
     n_atoms: int
-    _pdb_path: str = ""  # internal: path for re-loading topology in analysis functions
+    _path: str = ""  # internal: path for re-loading topology in analysis functions
+    _loader: str = "ztraj_load_pdb"  # internal: C API function name for re-loading
 
 
-def load_pdb(path: str | Path) -> Structure:
-    """Load a PDB file and return a Structure with coordinates and topology.
-
-    Args:
-        path: Path to the PDB file.
-
-    Returns:
-        Structure with coords (Angstroms), masses, atom/residue names.
-    """
+def _load_structure(load_fn, path: str | Path, label: str) -> Structure:
+    """Internal helper: load a structure file via the given C API function."""
     ffi = get_ffi()
     lib = get_lib()
 
     path_bytes = str(path).encode("utf-8")
     handle_ptr = ffi.new("void**")
 
-    _check(lib.ztraj_load_pdb(path_bytes, handle_ptr), f"load_pdb({path})")
+    _check(load_fn(path_bytes, handle_ptr), f"{label}({path})")
     handle = handle_ptr[0]
     if handle == ffi.NULL:
-        raise ZtrajError(f"load_pdb({path}): returned success but handle is null")
+        raise ZtrajError(f"{label}({path}): returned success but handle is null")
 
     try:
         n_atoms = lib.ztraj_get_n_atoms(handle)
@@ -90,8 +84,24 @@ def load_pdb(path: str | Path) -> Structure:
         residue_names=residue_names,
         resids=resids,
         n_atoms=n_atoms,
-        _pdb_path=str(path),
+        _path=str(path),
+        _loader=label.replace("load_", "ztraj_load_"),
     )
+
+
+def load_pdb(path: str | Path) -> Structure:
+    """Load a PDB file and return a Structure with coordinates and topology."""
+    return _load_structure(get_lib().ztraj_load_pdb, path, "load_pdb")
+
+
+def load_gro(path: str | Path) -> Structure:
+    """Load a GRO (GROMACS) file and return a Structure with coordinates and topology."""
+    return _load_structure(get_lib().ztraj_load_gro, path, "load_gro")
+
+
+def load_mmcif(path: str | Path) -> Structure:
+    """Load an mmCIF file and return a Structure with coordinates and topology."""
+    return _load_structure(get_lib().ztraj_load_mmcif, path, "load_mmcif")
 
 
 class XtcReader:
@@ -181,3 +191,134 @@ def open_xtc(path: str | Path, n_atoms: int) -> XtcReader:
         XtcReader context manager yielding Frame objects.
     """
     return XtcReader(path, n_atoms)
+
+
+class _TrajectoryReader:
+    """Generic streaming trajectory reader (context manager).
+
+    Subclasses specify the C API function names for open/read/close.
+    """
+
+    @dataclass
+    class Frame:
+        """A single trajectory frame."""
+
+        coords: NDArray[np.float32]  # (n_atoms, 3)
+        time: float  # picoseconds
+        step: int
+
+    def __init__(
+        self,
+        path: str | Path,
+        n_atoms: int,
+        open_fn_name: str,
+        read_fn_name: str,
+        close_fn_name: str,
+        label: str,
+    ) -> None:
+        self._ffi = get_ffi()
+        self._lib = get_lib()
+        self._path = str(path).encode("utf-8")
+        self._expected_n_atoms = n_atoms
+        self._handle = None
+        self._n_atoms = 0
+        self._open_fn = getattr(self._lib, open_fn_name)
+        self._read_fn = getattr(self._lib, read_fn_name)
+        self._close_fn = getattr(self._lib, close_fn_name)
+        self._label = label
+
+    def __enter__(self):
+        n_atoms_out = self._ffi.new("size_t*")
+        handle_ptr = self._ffi.new("void**")
+        _check(self._open_fn(self._path, n_atoms_out, handle_ptr), self._label)
+        self._handle = handle_ptr[0]
+        if self._handle == self._ffi.NULL:
+            raise ZtrajError(f"{self._label}: returned success but handle is null")
+        self._n_atoms = n_atoms_out[0]
+
+        if self._n_atoms != self._expected_n_atoms:
+            self._close_fn(self._handle)
+            self._handle = None
+            msg = (
+                f"{self._label} has {self._n_atoms} atoms but expected "
+                f"{self._expected_n_atoms} (from topology)"
+            )
+            raise ValueError(msg)
+
+        return self
+
+    def __exit__(self, *args) -> None:
+        if self._handle is not None:
+            self._close_fn(self._handle)
+            self._handle = None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> _TrajectoryReader.Frame:
+        if self._handle is None:
+            raise StopIteration
+
+        x = np.empty(self._n_atoms, dtype=np.float32)
+        y = np.empty(self._n_atoms, dtype=np.float32)
+        z = np.empty(self._n_atoms, dtype=np.float32)
+        time_out = self._ffi.new("float*")
+        step_out = self._ffi.new("int32_t*")
+
+        rc = self._read_fn(self._handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z), time_out, step_out)
+
+        if rc == self._lib.ZTRAJ_ERROR_EOF:
+            raise StopIteration
+
+        if rc != 0:
+            # Close handle on read error to prevent broken-stream iteration
+            self._close_fn(self._handle)
+            self._handle = None
+        _check(rc, f"read_{self._label}_frame")
+
+        coords = np.column_stack([x, y, z])
+        return _TrajectoryReader.Frame(
+            coords=coords, time=float(time_out[0]), step=int(step_out[0])
+        )
+
+
+class TrrReader(_TrajectoryReader):
+    """Streaming TRR trajectory reader (context manager).
+
+    Usage::
+
+        with pyztraj.open_trr("traj.trr", n_atoms) as reader:
+            for frame in reader:
+                print(frame.time, frame.coords.shape)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int) -> None:
+        super().__init__(
+            path, n_atoms, "ztraj_open_trr", "ztraj_read_trr_frame", "ztraj_close_trr", "trr"
+        )
+
+
+class DcdReader(_TrajectoryReader):
+    """Streaming DCD trajectory reader (context manager).
+
+    Usage::
+
+        with pyztraj.open_dcd("traj.dcd", n_atoms) as reader:
+            for frame in reader:
+                print(frame.time, frame.coords.shape)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int) -> None:
+        super().__init__(
+            path, n_atoms, "ztraj_open_dcd", "ztraj_read_dcd_frame", "ztraj_close_dcd", "dcd"
+        )
+
+
+def open_trr(path: str | Path, n_atoms: int) -> TrrReader:
+    """Open a TRR trajectory file for streaming frame-by-frame reading."""
+    return TrrReader(path, n_atoms)
+
+
+def open_dcd(path: str | Path, n_atoms: int) -> DcdReader:
+    """Open a DCD trajectory file for streaming frame-by-frame reading."""
+    return DcdReader(path, n_atoms)

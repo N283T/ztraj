@@ -31,7 +31,18 @@ from pyztraj.geometry import (
     minimum_image_distance,
     wrap_coords,
 )
-from pyztraj.io import Structure, XtcReader, load_pdb, open_xtc
+from pyztraj.io import (
+    DcdReader,
+    Structure,
+    TrrReader,
+    XtcReader,
+    load_gro,
+    load_mmcif,
+    load_pdb,
+    open_dcd,
+    open_trr,
+    open_xtc,
+)
 
 
 def get_version() -> str:
@@ -46,6 +57,8 @@ __all__ = [
     "SasaResult",
     "Structure",
     "XtcReader",
+    "TrrReader",
+    "DcdReader",
     "ZtrajError",
     "analyze_all",
     "compute_angles",
@@ -66,9 +79,13 @@ __all__ = [
     "compute_sasa",
     "detect_hbonds",
     "get_version",
+    "load_gro",
+    "load_mmcif",
     "load_pdb",
     "make_molecules_whole",
     "minimum_image_distance",
+    "open_dcd",
+    "open_trr",
     "open_xtc",
     "wrap_coords",
 ]
