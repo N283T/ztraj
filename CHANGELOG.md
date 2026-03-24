@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.1] - 2026-03-24
+
+### Added
+- Python bindings for all I/O formats: `load_gro`, `load_mmcif`, `open_trr`, `open_dcd`
+- Python file writers: `write_pdb`, `write_gro`, `XtcWriter`, `TrrWriter` context managers
+- Python protein dihedral functions: `compute_phi`, `compute_psi`, `compute_omega`, `compute_chi`
+- Python DSSP secondary structure: `compute_dssp`
+- Python atom selection: `Structure.select()` method (backbone, protein, water, by name)
+- C API: structure loaders (`ztraj_load_gro`, `ztraj_load_mmcif`)
+- C API: trajectory readers (`ztraj_open_trr/dcd` + read/close)
+- C API: file writers (`ztraj_write_pdb/gro`, `ztraj_open_xtc/trr_writer` + write/close)
+- C API: protein dihedrals (`ztraj_compute_phi/psi/omega/chi`)
+- C API: DSSP (`ztraj_compute_dssp`)
+- C API: atom selection (`ztraj_select_keyword`, `ztraj_select_name`)
+
+### Fixed
+- Analysis functions now work with GRO/mmCIF-loaded structures (format-aware topology reloading)
+- Writer close errors properly surfaced in Python (not silently discarded)
+- ResourceWarning for unclosed trajectory writers
+
+### Changed
+- pyproject.toml version bumped to 0.4.1
+- Refactored `_load_structure` helper and `_TrajectoryReader`/`_TrajectoryWriter` base classes
+
 ## [0.4.0] - 2026-03-23
 
 ### Added
