@@ -29,6 +29,9 @@ const native_contacts_mod = @import("analysis/native_contacts.zig");
 const msd_mod = @import("analysis/msd.zig");
 const pca_mod = @import("analysis/pca.zig");
 const pbc_mod = @import("geometry/pbc.zig");
+const protein_dihedrals_mod = @import("geometry/protein_dihedrals.zig");
+const dssp_mod = @import("analysis/dssp/dssp.zig");
+const dssp_types = @import("analysis/dssp/types.zig");
 
 // =============================================================================
 // Error Codes
@@ -1470,6 +1473,173 @@ export fn ztraj_make_molecules_whole(
     pbc_mod.makeMoleculesWhole(c_allocator, x[0..n_atoms], y[0..n_atoms], z[0..n_atoms], h.parse_result.topology, b) catch |err| {
         return mapPbcError(err);
     };
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Analysis: Protein Dihedrals
+// =============================================================================
+
+/// Compute backbone phi dihedral angles for all residues.
+/// `result` must have n_residues elements. Undefined angles are NaN.
+/// `n_residues_out` receives the number of residues.
+export fn ztraj_compute_phi(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    result: [*]f32,
+    n_residues_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    n_residues_out.* = topo.residues.len;
+
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const angles = protein_dihedrals_mod.computePhi(c_allocator, topo, frame) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer c_allocator.free(angles);
+
+    for (angles, 0..) |angle, i| {
+        result[i] = angle orelse std.math.nan(f32);
+    }
+    return ZTRAJ_OK;
+}
+
+/// Compute backbone psi dihedral angles for all residues.
+/// `result` must have n_residues elements. Undefined angles are NaN.
+/// `n_residues_out` receives the number of residues.
+export fn ztraj_compute_psi(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    result: [*]f32,
+    n_residues_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    n_residues_out.* = topo.residues.len;
+
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const angles = protein_dihedrals_mod.computePsi(c_allocator, topo, frame) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer c_allocator.free(angles);
+
+    for (angles, 0..) |angle, i| {
+        result[i] = angle orelse std.math.nan(f32);
+    }
+    return ZTRAJ_OK;
+}
+
+/// Compute backbone omega dihedral angles for all residues.
+/// `result` must have n_residues elements. Undefined angles are NaN.
+/// `n_residues_out` receives the number of residues.
+export fn ztraj_compute_omega(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    result: [*]f32,
+    n_residues_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    n_residues_out.* = topo.residues.len;
+
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const angles = protein_dihedrals_mod.computeOmega(c_allocator, topo, frame) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    defer c_allocator.free(angles);
+
+    for (angles, 0..) |angle, i| {
+        result[i] = angle orelse std.math.nan(f32);
+    }
+    return ZTRAJ_OK;
+}
+
+/// Compute side-chain chi dihedral angles for all residues at the given level (1-4).
+/// `result` must have n_residues elements. Undefined angles (wrong level or residue
+/// type) are NaN. `n_residues_out` receives the number of residues.
+export fn ztraj_compute_chi(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    chi_level: u8,
+    result: [*]f32,
+    n_residues_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    n_residues_out.* = topo.residues.len;
+
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const angles = protein_dihedrals_mod.computeChi(c_allocator, topo, frame, chi_level) catch |err| {
+        return switch (err) {
+            error.InvalidChiLevel => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
+    };
+    defer c_allocator.free(angles);
+
+    for (angles, 0..) |angle, i| {
+        result[i] = angle orelse std.math.nan(f32);
+    }
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Analysis: DSSP Secondary Structure
+// =============================================================================
+
+/// Compute DSSP secondary structure assignment.
+/// `result` must have n_residues elements. Each byte is a DSSP code:
+/// 'H'=alpha-helix, 'E'=strand, 'G'=3-10 helix, 'I'=pi-helix,
+/// 'T'=turn, 'S'=bend, 'B'=beta-bridge, 'P'=PP-II, ' '=loop.
+/// Residues not assignable (incomplete backbone) get ' '.
+export fn ztraj_compute_dssp(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    result: [*]u8,
+    n_residues_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    n_residues_out.* = topo.residues.len;
+
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    var dssp_result = dssp_mod.compute(c_allocator, topo, frame, .{}) catch {
+        // Fill with spaces (loop) for residues that couldn't be assigned
+        @memset(result[0..topo.residues.len], ' ');
+        return ZTRAJ_OK;
+    };
+    defer dssp_result.deinit();
+
+    // Initialize all to loop (' ')
+    @memset(result[0..topo.residues.len], ' ');
+
+    // Fill in DSSP assignments for complete residues
+    for (dssp_result.residues) |res| {
+        if (res.residue_index < topo.residues.len) {
+            result[res.residue_index] = res.secondary_structure.toChar();
+        }
+    }
     return ZTRAJ_OK;
 }
 
