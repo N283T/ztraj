@@ -21,6 +21,8 @@ from pyztraj._helpers import (
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+    from pyztraj.io import Structure
+
 
 def compute_distances(
     coords: NDArray[np.float32],
