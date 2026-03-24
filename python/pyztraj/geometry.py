@@ -572,3 +572,117 @@ def compute_msd(
         "compute_msd",
     )
     return result
+
+
+# ============================================================================
+# Protein backbone dihedrals
+# ============================================================================
+
+
+def _compute_dihedral(
+    structure: Structure,
+    coords: NDArray[np.float32],
+    fn_name: str,
+    label: str,
+) -> NDArray[np.float32]:
+    """Internal helper for protein dihedral angle computation."""
+    ffi = get_ffi()
+    lib = get_lib()
+
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+
+    handle = _load_topology_handle(structure, lib, ffi, label)
+
+    try:
+        n_res_out = ffi.new("size_t*")
+        # First call to get n_residues
+        fn = getattr(lib, fn_name)
+        # Allocate with max possible size (n_atoms as upper bound, but we need n_residues)
+        # We call with a dummy buffer first... actually, the C API writes n_residues_out
+        # even on error paths, so let's just use n_atoms as safe upper bound then trim.
+        result = np.empty(n_atoms, dtype=np.float32)
+        _check(
+            fn(handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z), n_atoms, _ptr_f32(result), n_res_out),
+            label,
+        )
+        n_residues = n_res_out[0]
+        return result[:n_residues].copy()
+    finally:
+        lib.ztraj_free_structure(handle)
+
+
+def compute_phi(structure: Structure, coords: NDArray[np.float32]) -> NDArray[np.float32]:
+    """Compute backbone phi angles for all residues.
+
+    Args:
+        structure: Loaded structure (from load_pdb/load_gro/load_mmcif).
+        coords: Atom coordinates (n_atoms, 3) in Angstroms.
+
+    Returns:
+        Array of phi angles in radians (n_residues,). NaN where undefined.
+    """
+    return _compute_dihedral(structure, coords, "ztraj_compute_phi", "compute_phi")
+
+
+def compute_psi(structure: Structure, coords: NDArray[np.float32]) -> NDArray[np.float32]:
+    """Compute backbone psi angles for all residues.
+
+    Returns:
+        Array of psi angles in radians (n_residues,). NaN where undefined.
+    """
+    return _compute_dihedral(structure, coords, "ztraj_compute_psi", "compute_psi")
+
+
+def compute_omega(structure: Structure, coords: NDArray[np.float32]) -> NDArray[np.float32]:
+    """Compute backbone omega angles for all residues.
+
+    Returns:
+        Array of omega angles in radians (n_residues,). NaN where undefined.
+    """
+    return _compute_dihedral(structure, coords, "ztraj_compute_omega", "compute_omega")
+
+
+def compute_chi(
+    structure: Structure,
+    coords: NDArray[np.float32],
+    chi_level: int = 1,
+) -> NDArray[np.float32]:
+    """Compute side-chain chi angles for all residues.
+
+    Args:
+        structure: Loaded structure.
+        coords: Atom coordinates (n_atoms, 3) in Angstroms.
+        chi_level: Chi angle level (1-4).
+
+    Returns:
+        Array of chi angles in radians (n_residues,). NaN where undefined.
+    """
+    ffi = get_ffi()
+    lib = get_lib()
+
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+
+    handle = _load_topology_handle(structure, lib, ffi, "compute_chi")
+
+    try:
+        n_res_out = ffi.new("size_t*")
+        result = np.empty(n_atoms, dtype=np.float32)
+        _check(
+            lib.ztraj_compute_chi(
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                chi_level,
+                _ptr_f32(result),
+                n_res_out,
+            ),
+            "compute_chi",
+        )
+        n_residues = n_res_out[0]
+        return result[:n_residues].copy()
+    finally:
+        lib.ztraj_free_structure(handle)

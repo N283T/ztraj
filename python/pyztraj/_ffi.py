@@ -155,6 +155,20 @@ _CDEF = """
                            const float* x, const float* y, const float* z,
                            size_t n_atoms, uint32_t n_points, double probe_radius,
                            size_t n_threads, double* atom_areas, double* total_area);
+
+    // Protein dihedrals
+    int ztraj_compute_phi(void* handle, const float* x, const float* y, const float* z,
+                          size_t n_atoms, float* result, size_t* n_residues_out);
+    int ztraj_compute_psi(void* handle, const float* x, const float* y, const float* z,
+                          size_t n_atoms, float* result, size_t* n_residues_out);
+    int ztraj_compute_omega(void* handle, const float* x, const float* y, const float* z,
+                            size_t n_atoms, float* result, size_t* n_residues_out);
+    int ztraj_compute_chi(void* handle, const float* x, const float* y, const float* z,
+                          size_t n_atoms, uint8_t chi_level, float* result, size_t* n_residues_out);
+
+    // DSSP
+    int ztraj_compute_dssp(void* handle, const float* x, const float* y, const float* z,
+                           size_t n_atoms, uint8_t* result, size_t* n_residues_out);
 """
 
 _ffi = cffi.FFI()
