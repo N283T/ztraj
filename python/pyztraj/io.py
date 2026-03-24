@@ -28,6 +28,55 @@ class Structure:
     _path: str = ""  # internal: path for re-loading topology in analysis functions
     _loader: str = "ztraj_load_pdb"  # internal: C API function name for re-loading
 
+    def select(self, expr: str) -> NDArray[np.uint32]:
+        """Select atoms by expression.
+
+        Args:
+            expr: Selection expression. Supported:
+                - "backbone" — backbone atoms (N, CA, C, O) of protein residues
+                - "protein" — all atoms of protein residues
+                - "water" — water molecules
+                - "name CA" — atoms with name CA (prefix "name " + atom name)
+                - "CA" — shorthand for "name CA"
+
+        Returns:
+            Array of 0-based atom indices (uint32).
+        """
+        ffi = get_ffi()
+        lib = get_lib()
+
+        handle = _load_topology_handle(self, lib, ffi, "select")
+
+        try:
+            indices_ptr = ffi.new("uint32_t**")
+            count_ptr = ffi.new("size_t*")
+
+            keyword_map = {"backbone": 0, "protein": 1, "water": 2}
+
+            if expr in keyword_map:
+                _check(
+                    lib.ztraj_select_keyword(handle, keyword_map[expr], indices_ptr, count_ptr),
+                    f"select({expr})",
+                )
+            else:
+                name = expr.removeprefix("name ") if expr.startswith("name ") else expr
+                name_bytes = name.encode("utf-8")
+                _check(
+                    lib.ztraj_select_name(handle, name_bytes, indices_ptr, count_ptr),
+                    f"select({expr})",
+                )
+
+            count = count_ptr[0]
+            if count == 0:
+                return np.array([], dtype=np.uint32)
+
+            result = np.empty(count, dtype=np.uint32)
+            ffi.memmove(result.ctypes.data, indices_ptr[0], count * 4)
+            lib.ztraj_free_selection(indices_ptr[0], count)
+            return result
+        finally:
+            lib.ztraj_free_structure(handle)
+
 
 def _load_structure(load_fn, path: str | Path, label: str) -> Structure:
     """Internal helper: load a structure file via the given C API function."""

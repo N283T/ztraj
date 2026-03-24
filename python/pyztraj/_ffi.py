@@ -187,6 +187,12 @@ _CDEF = """
     int ztraj_write_trr_frame(void* handle, const float* x, const float* y, const float* z,
                               size_t n_atoms, float time, int32_t step);
     int ztraj_close_trr_writer(void* handle);
+
+    // Atom selection
+    int ztraj_select_keyword(void* handle, int keyword, uint32_t** indices_out, size_t* count_out);
+    int ztraj_select_name(void* handle, const char* name,
+                          uint32_t** indices_out, size_t* count_out);
+    void ztraj_free_selection(uint32_t* indices, size_t count);
 """
 
 _ffi = cffi.FFI()
