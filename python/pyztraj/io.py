@@ -68,6 +68,7 @@ class Structure:
 
             count = count_ptr[0]
             if count == 0:
+                lib.ztraj_free_selection(indices_ptr[0], count)
                 return np.array([], dtype=np.uint32)
 
             result = np.empty(count, dtype=np.uint32)

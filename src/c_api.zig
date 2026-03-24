@@ -1945,13 +1945,14 @@ export fn ztraj_select_name(
     return ZTRAJ_OK;
 }
 
-/// Free a selection result returned by ztraj_select_*.
+/// Free a selection result returned by ztraj_select_*. Safe to call with count=0.
 export fn ztraj_free_selection(
-    indices: [*]u32,
+    indices: ?[*]u32,
     count: usize,
 ) callconv(.c) void {
+    const ptr = indices orelse return;
     if (count == 0) return;
-    c_allocator.free(indices[0..count]);
+    c_allocator.free(ptr[0..count]);
 }
 
 // =============================================================================
