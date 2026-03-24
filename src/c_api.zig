@@ -1644,6 +1644,252 @@ export fn ztraj_compute_dssp(
 }
 
 // =============================================================================
+// File Writers: PDB, GRO
+// =============================================================================
+
+/// Write coordinates to a PDB file.
+///
+/// Uses topology from the structure handle and coordinates from caller buffers.
+/// `n_atoms` must match the number of atoms in the topology.
+export fn ztraj_write_pdb(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    path: [*:0]const u8,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    const file = std.fs.cwd().createFile(path_slice, .{}) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    defer file.close();
+
+    var buf = std.ArrayListUnmanaged(u8){};
+    defer buf.deinit(c_allocator);
+    pdb_mod.write(buf.writer(c_allocator), topo, frame) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    file.writeAll(buf.items) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+
+    return ZTRAJ_OK;
+}
+
+/// Write coordinates to a GRO file.
+///
+/// Uses topology from the structure handle and coordinates from caller buffers.
+/// `n_atoms` must match the number of atoms in the topology.
+export fn ztraj_write_gro(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    path: [*:0]const u8,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    const file = std.fs.cwd().createFile(path_slice, .{}) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    defer file.close();
+
+    var buf = std.ArrayListUnmanaged(u8){};
+    defer buf.deinit(c_allocator);
+    gro_mod.write(buf.writer(c_allocator), topo, frame) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    file.writeAll(buf.items) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Trajectory Writer: XTC
+// =============================================================================
+
+const XTC_WRITER_MAGIC: u64 = 0xCAFE_BABE_58C0_0002;
+
+const XtcWriterHandle = struct {
+    magic: u64 = XTC_WRITER_MAGIC,
+    writer: xtc_mod.XtcWriter,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *XtcWriterHandle) void {
+        self.magic = 0;
+        self.writer.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+fn castXtcWriterHandle(handle: ?*anyopaque) ?*XtcWriterHandle {
+    const h: *XtcWriterHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != XTC_WRITER_MAGIC) return null;
+    return h;
+}
+
+/// Open an XTC trajectory file for writing.
+///
+/// `n_atoms` must match the number of atoms that will be written per frame.
+/// On success `handle_out` is set to a non-null opaque pointer.
+/// The handle must be closed with `ztraj_close_xtc_writer`.
+export fn ztraj_open_xtc_writer(
+    path: [*:0]const u8,
+    n_atoms: usize,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+    const path_slice = std.mem.sliceTo(path, 0);
+
+    var writer = xtc_mod.XtcWriter.open(c_allocator, path_slice, n_atoms) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    errdefer writer.deinit();
+
+    const handle = c_allocator.create(XtcWriterHandle) catch {
+        writer.deinit();
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{ .writer = writer, .allocator = c_allocator };
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Write one frame to an open XTC writer.
+///
+/// `n_atoms` must equal the value passed to `ztraj_open_xtc_writer`.
+export fn ztraj_write_xtc_frame(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    time: f32,
+    step: i32,
+) callconv(.c) c_int {
+    const h = castXtcWriterHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    var frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+    frame.time = time;
+    frame.step = step;
+    h.writer.writeFrame(frame) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    return ZTRAJ_OK;
+}
+
+/// Flush and close an XTC writer, freeing all resources.
+///
+/// Always call this when done writing; do not use the handle afterwards.
+export fn ztraj_close_xtc_writer(handle: ?*anyopaque) callconv(.c) c_int {
+    const h = castXtcWriterHandle(handle) orelse return ZTRAJ_OK;
+    h.writer.close() catch {
+        h.deinit();
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    h.magic = 0;
+    h.allocator.destroy(h);
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Trajectory Writer: TRR
+// =============================================================================
+
+const TRR_WRITER_MAGIC: u64 = 0xCAFE_BABE_58C0_0003;
+
+const TrrWriterHandle = struct {
+    magic: u64 = TRR_WRITER_MAGIC,
+    writer: trr_mod.TrrWriter,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *TrrWriterHandle) void {
+        self.magic = 0;
+        self.writer.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+fn castTrrWriterHandle(handle: ?*anyopaque) ?*TrrWriterHandle {
+    const h: *TrrWriterHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != TRR_WRITER_MAGIC) return null;
+    return h;
+}
+
+/// Open a TRR trajectory file for writing.
+///
+/// `n_atoms` must match the number of atoms that will be written per frame.
+/// On success `handle_out` is set to a non-null opaque pointer.
+/// The handle must be closed with `ztraj_close_trr_writer`.
+export fn ztraj_open_trr_writer(
+    path: [*:0]const u8,
+    n_atoms: usize,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+    const path_slice = std.mem.sliceTo(path, 0);
+
+    var writer = trr_mod.TrrWriter.open(c_allocator, path_slice, n_atoms) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    errdefer writer.deinit();
+
+    const handle = c_allocator.create(TrrWriterHandle) catch {
+        writer.deinit();
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{ .writer = writer, .allocator = c_allocator };
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Write one frame to an open TRR writer.
+///
+/// `n_atoms` must equal the value passed to `ztraj_open_trr_writer`.
+export fn ztraj_write_trr_frame(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    time: f32,
+    step: i32,
+) callconv(.c) c_int {
+    const h = castTrrWriterHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    var frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+    frame.time = time;
+    frame.step = step;
+    h.writer.writeFrame(frame) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    return ZTRAJ_OK;
+}
+
+/// Flush and close a TRR writer, freeing all resources.
+///
+/// Always call this when done writing; do not use the handle afterwards.
+export fn ztraj_close_trr_writer(handle: ?*anyopaque) callconv(.c) c_int {
+    const h = castTrrWriterHandle(handle) orelse return ZTRAJ_OK;
+    h.writer.close() catch {
+        h.deinit();
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    h.magic = 0;
+    h.allocator.destroy(h);
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
