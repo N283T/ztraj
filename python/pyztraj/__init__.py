@@ -8,10 +8,10 @@ from pyztraj.analysis import (
     PcaResult,
     SasaResult,
     compute_contacts,
+    compute_dssp,
     compute_native_contacts_q,
     compute_pca,
     compute_rdf,
-    compute_dssp,
     compute_sasa,
     detect_hbonds,
 )
