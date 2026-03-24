@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pyztraj._ffi import get_ffi, get_lib
-from pyztraj._helpers import ZtrajError, _check, _ptr_f32, _ptr_f64, _ptr_i32
+from pyztraj._helpers import ZtrajError, _check, _load_topology_handle, _ptr_f32, _ptr_f64, _ptr_i32
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -322,3 +322,201 @@ def open_trr(path: str | Path, n_atoms: int) -> TrrReader:
 def open_dcd(path: str | Path, n_atoms: int) -> DcdReader:
     """Open a DCD trajectory file for streaming frame-by-frame reading."""
     return DcdReader(path, n_atoms)
+
+
+# ============================================================================
+# Structure writers
+# ============================================================================
+
+
+def write_pdb(
+    path: str | Path, structure: Structure, coords: NDArray[np.float32] | None = None
+) -> None:
+    """Write structure as PDB file.
+
+    Args:
+        path: Output file path.
+        structure: Loaded structure (topology source).
+        coords: Coordinates (n_atoms, 3). If None, uses structure.coords.
+    """
+    _write_structure("ztraj_write_pdb", path, structure, coords)
+
+
+def write_gro(
+    path: str | Path, structure: Structure, coords: NDArray[np.float32] | None = None
+) -> None:
+    """Write structure as GRO file.
+
+    Args:
+        path: Output file path.
+        structure: Loaded structure (topology source).
+        coords: Coordinates (n_atoms, 3). If None, uses structure.coords.
+    """
+    _write_structure("ztraj_write_gro", path, structure, coords)
+
+
+def _write_structure(
+    fn_name: str,
+    path: str | Path,
+    structure: Structure,
+    coords: NDArray[np.float32] | None = None,
+) -> None:
+    """Internal helper for writing structure files."""
+    ffi = get_ffi()
+    lib = get_lib()
+
+    if coords is None:
+        coords = structure.coords
+    coords = np.ascontiguousarray(coords, dtype=np.float32)
+
+    x, y, z = coords[:, 0].copy(), coords[:, 1].copy(), coords[:, 2].copy()
+    n_atoms = len(x)
+
+    handle = _load_topology_handle(structure, lib, ffi, fn_name)
+
+    try:
+        path_bytes = str(path).encode("utf-8")
+        write_fn = getattr(lib, fn_name)
+        _check(
+            write_fn(handle, _ptr_f32(x), _ptr_f32(y), _ptr_f32(z), n_atoms, path_bytes),
+            fn_name,
+        )
+    finally:
+        lib.ztraj_free_structure(handle)
+
+
+# ============================================================================
+# Trajectory writers
+# ============================================================================
+
+
+class _TrajectoryWriter:
+    """Generic streaming trajectory writer (context manager).
+
+    Subclasses specify the C API function names for open/write/close.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        n_atoms: int,
+        open_fn_name: str,
+        write_fn_name: str,
+        close_fn_name: str,
+        label: str,
+    ) -> None:
+        self._ffi = get_ffi()
+        self._lib = get_lib()
+        self._path = str(path).encode("utf-8")
+        self._n_atoms = n_atoms
+        self._handle = None
+        self._open_fn = getattr(self._lib, open_fn_name)
+        self._write_fn = getattr(self._lib, write_fn_name)
+        self._close_fn = getattr(self._lib, close_fn_name)
+        self._label = label
+
+    def __enter__(self):
+        handle_ptr = self._ffi.new("void**")
+        _check(self._open_fn(self._path, self._n_atoms, handle_ptr), self._label)
+        self._handle = handle_ptr[0]
+        if self._handle == self._ffi.NULL:
+            raise ZtrajError(f"{self._label}: returned success but handle is null")
+        return self
+
+    def __exit__(self, exc_type, *args) -> None:
+        if self._handle is not None:
+            rc = self._close_fn(self._handle)
+            self._handle = None
+            if exc_type is None:
+                _check(rc, f"{self._label}/close")
+
+    def __del__(self) -> None:
+        if self._handle is not None:
+            import warnings
+
+            warnings.warn(
+                f"{self._label}: writer was not properly closed. "
+                "Use 'with' statement to ensure data is flushed.",
+                ResourceWarning,
+                stacklevel=2,
+            )
+            self._close_fn(self._handle)
+            self._handle = None
+
+    def write_frame(
+        self,
+        coords: NDArray[np.float32],
+        time: float = 0.0,
+        step: int = 0,
+    ) -> None:
+        """Write a single frame.
+
+        Args:
+            coords: Atom coordinates (n_atoms, 3) in Angstroms.
+            time: Simulation time in picoseconds.
+            step: Step counter.
+        """
+        if self._handle is None:
+            raise ZtrajError(f"{self._label}: writer is not open")
+
+        coords = np.ascontiguousarray(coords, dtype=np.float32)
+        if coords.shape[0] != self._n_atoms:
+            msg = (
+                f"{self._label}: coords has {coords.shape[0]} atoms "
+                f"but writer expects {self._n_atoms}"
+            )
+            raise ValueError(msg)
+        x, y, z = coords[:, 0].copy(), coords[:, 1].copy(), coords[:, 2].copy()
+
+        _check(
+            self._write_fn(
+                self._handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                self._n_atoms,
+                time,
+                step,
+            ),
+            f"{self._label}/write_frame",
+        )
+
+
+class XtcWriter(_TrajectoryWriter):
+    """Streaming XTC trajectory writer (context manager).
+
+    Usage::
+
+        with pyztraj.XtcWriter("output.xtc", n_atoms) as writer:
+            writer.write_frame(coords, time=0.0, step=0)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int) -> None:
+        super().__init__(
+            path,
+            n_atoms,
+            "ztraj_open_xtc_writer",
+            "ztraj_write_xtc_frame",
+            "ztraj_close_xtc_writer",
+            "xtc_writer",
+        )
+
+
+class TrrWriter(_TrajectoryWriter):
+    """Streaming TRR trajectory writer (context manager).
+
+    Usage::
+
+        with pyztraj.TrrWriter("output.trr", n_atoms) as writer:
+            writer.write_frame(coords, time=0.0, step=0)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int) -> None:
+        super().__init__(
+            path,
+            n_atoms,
+            "ztraj_open_trr_writer",
+            "ztraj_write_trr_frame",
+            "ztraj_close_trr_writer",
+            "trr_writer",
+        )

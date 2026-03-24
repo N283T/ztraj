@@ -40,13 +40,17 @@ from pyztraj.io import (
     DcdReader,
     Structure,
     TrrReader,
+    TrrWriter,
     XtcReader,
+    XtcWriter,
     load_gro,
     load_mmcif,
     load_pdb,
     open_dcd,
     open_trr,
     open_xtc,
+    write_gro,
+    write_pdb,
 )
 
 
@@ -62,7 +66,9 @@ __all__ = [
     "SasaResult",
     "Structure",
     "XtcReader",
+    "XtcWriter",
     "TrrReader",
+    "TrrWriter",
     "DcdReader",
     "ZtrajError",
     "analyze_all",
@@ -98,4 +104,6 @@ __all__ = [
     "open_trr",
     "open_xtc",
     "wrap_coords",
+    "write_gro",
+    "write_pdb",
 ]
