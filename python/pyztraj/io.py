@@ -423,8 +423,23 @@ class _TrajectoryWriter:
             raise ZtrajError(f"{self._label}: returned success but handle is null")
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, exc_type, *args) -> None:
         if self._handle is not None:
+            rc = self._close_fn(self._handle)
+            self._handle = None
+            if exc_type is None:
+                _check(rc, f"{self._label}/close")
+
+    def __del__(self) -> None:
+        if self._handle is not None:
+            import warnings
+
+            warnings.warn(
+                f"{self._label}: writer was not properly closed. "
+                "Use 'with' statement to ensure data is flushed.",
+                ResourceWarning,
+                stacklevel=2,
+            )
             self._close_fn(self._handle)
             self._handle = None
 
@@ -445,6 +460,12 @@ class _TrajectoryWriter:
             raise ZtrajError(f"{self._label}: writer is not open")
 
         coords = np.ascontiguousarray(coords, dtype=np.float32)
+        if coords.shape[0] != self._n_atoms:
+            msg = (
+                f"{self._label}: coords has {coords.shape[0]} atoms "
+                f"but writer expects {self._n_atoms}"
+            )
+            raise ValueError(msg)
         x, y, z = coords[:, 0].copy(), coords[:, 1].copy(), coords[:, 2].copy()
 
         _check(

@@ -1661,6 +1661,7 @@ export fn ztraj_write_pdb(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
     const path_slice = std.mem.sliceTo(path, 0);
@@ -1671,8 +1672,8 @@ export fn ztraj_write_pdb(
 
     var buf = std.ArrayListUnmanaged(u8){};
     defer buf.deinit(c_allocator);
-    pdb_mod.write(buf.writer(c_allocator), topo, frame) catch {
-        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    pdb_mod.write(buf.writer(c_allocator), topo, frame) catch |err| {
+        return if (err == error.OutOfMemory) ZTRAJ_ERROR_OUT_OF_MEMORY else ZTRAJ_ERROR_FILE_IO;
     };
     file.writeAll(buf.items) catch {
         return ZTRAJ_ERROR_FILE_IO;
@@ -1695,6 +1696,7 @@ export fn ztraj_write_gro(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
     const path_slice = std.mem.sliceTo(path, 0);
@@ -1705,8 +1707,8 @@ export fn ztraj_write_gro(
 
     var buf = std.ArrayListUnmanaged(u8){};
     defer buf.deinit(c_allocator);
-    gro_mod.write(buf.writer(c_allocator), topo, frame) catch {
-        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    gro_mod.write(buf.writer(c_allocator), topo, frame) catch |err| {
+        return if (err == error.OutOfMemory) ZTRAJ_ERROR_OUT_OF_MEMORY else ZTRAJ_ERROR_FILE_IO;
     };
     file.writeAll(buf.items) catch {
         return ZTRAJ_ERROR_FILE_IO;
