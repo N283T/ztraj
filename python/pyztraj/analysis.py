@@ -480,3 +480,47 @@ def compute_pca(
         variance_ratio=variance_ratio,
         covariance=cov,
     )
+
+
+def compute_dssp(
+    structure: Structure,
+    coords: NDArray[np.float32],
+) -> NDArray:
+    """Compute DSSP secondary structure assignment for all residues.
+
+    Args:
+        structure: Loaded structure (from load_pdb/load_gro/load_mmcif).
+        coords: Atom coordinates (n_atoms, 3) in Angstroms.
+
+    Returns:
+        Array of single-character DSSP codes (n_residues,), dtype='U1'.
+        Codes: H=alpha-helix, E=strand, G=3-10 helix, I=pi-helix,
+        T=turn, S=bend, B=beta-bridge, P=PP-II, ' '=loop.
+    """
+    ffi = get_ffi()
+    lib = get_lib()
+
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+
+    handle = _load_topology_handle(structure, lib, ffi, "compute_dssp")
+
+    try:
+        n_res_out = ffi.new("size_t*")
+        result_buf = ffi.new(f"uint8_t[{n_atoms}]")  # upper bound
+        _check(
+            lib.ztraj_compute_dssp(
+                handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                n_atoms,
+                result_buf,
+                n_res_out,
+            ),
+            "compute_dssp",
+        )
+        n_residues = n_res_out[0]
+        return np.array([chr(result_buf[i]) for i in range(n_residues)], dtype="U1")
+    finally:
+        lib.ztraj_free_structure(handle)
