@@ -169,6 +169,24 @@ _CDEF = """
     // DSSP
     int ztraj_compute_dssp(void* handle, const float* x, const float* y, const float* z,
                            size_t n_atoms, uint8_t* result, size_t* n_residues_out);
+
+    // File writers: structure
+    int ztraj_write_pdb(void* handle, const float* x, const float* y, const float* z,
+                        size_t n_atoms, const char* path);
+    int ztraj_write_gro(void* handle, const float* x, const float* y, const float* z,
+                        size_t n_atoms, const char* path);
+
+    // File writers: XTC trajectory
+    int ztraj_open_xtc_writer(const char* path, size_t n_atoms, void** handle_out);
+    int ztraj_write_xtc_frame(void* handle, const float* x, const float* y, const float* z,
+                              size_t n_atoms, float time, int32_t step);
+    int ztraj_close_xtc_writer(void* handle);
+
+    // File writers: TRR trajectory
+    int ztraj_open_trr_writer(const char* path, size_t n_atoms, void** handle_out);
+    int ztraj_write_trr_frame(void* handle, const float* x, const float* y, const float* z,
+                              size_t n_atoms, float time, int32_t step);
+    int ztraj_close_trr_writer(void* handle);
 """
 
 _ffi = cffi.FFI()
