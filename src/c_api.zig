@@ -32,6 +32,7 @@ const pbc_mod = @import("geometry/pbc.zig");
 const protein_dihedrals_mod = @import("geometry/protein_dihedrals.zig");
 const dssp_mod = @import("analysis/dssp/dssp.zig");
 const dssp_types = @import("analysis/dssp/types.zig");
+const select_mod = @import("select.zig");
 
 // =============================================================================
 // Error Codes
@@ -1889,6 +1890,69 @@ export fn ztraj_close_trr_writer(handle: ?*anyopaque) callconv(.c) c_int {
     h.magic = 0;
     h.allocator.destroy(h);
     return ZTRAJ_OK;
+}
+
+// =============================================================================
+// Atom Selection
+// =============================================================================
+
+/// Select atoms by keyword: 0=backbone, 1=protein, 2=water.
+/// Allocates and returns an array of atom indices.
+/// Caller must free with ztraj_free_selection().
+export fn ztraj_select_keyword(
+    handle: ?*anyopaque,
+    keyword: c_int,
+    indices_out: *[*]u32,
+    count_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+
+    const kw: select_mod.Keyword = switch (keyword) {
+        0 => .backbone,
+        1 => .protein,
+        2 => .water,
+        else => return ZTRAJ_ERROR_INVALID_INPUT,
+    };
+
+    const result = select_mod.byKeyword(c_allocator, topo, kw) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+
+    indices_out.* = result.ptr;
+    count_out.* = result.len;
+    return ZTRAJ_OK;
+}
+
+/// Select atoms by name (exact match, e.g. "CA", "N").
+/// Caller must free with ztraj_free_selection().
+export fn ztraj_select_name(
+    handle: ?*anyopaque,
+    name: [*:0]const u8,
+    indices_out: *[*]u32,
+    count_out: *usize,
+) callconv(.c) c_int {
+    const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    const topo = h.parse_result.topology;
+    const name_slice = std.mem.sliceTo(name, 0);
+
+    const result = select_mod.byName(c_allocator, topo, name_slice) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+
+    indices_out.* = result.ptr;
+    count_out.* = result.len;
+    return ZTRAJ_OK;
+}
+
+/// Free a selection result returned by ztraj_select_*. Safe to call with count=0.
+export fn ztraj_free_selection(
+    indices: ?[*]u32,
+    count: usize,
+) callconv(.c) void {
+    const ptr = indices orelse return;
+    if (count == 0) return;
+    c_allocator.free(ptr[0..count]);
 }
 
 // =============================================================================
