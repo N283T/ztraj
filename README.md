@@ -19,8 +19,14 @@ High-performance molecular dynamics trajectory analysis library and CLI, written
 ## CLI
 
 ```bash
-zig build -Doptimize=ReleaseFast
+# Install from PyPI (no Zig required)
+uv tool install pyztraj
 
+# Or build from source (requires Zig 0.15.2+)
+zig build -Doptimize=ReleaseFast
+```
+
+```bash
 # RMSD against frame 0 for backbone atoms
 ztraj rmsd traj.xtc --top structure.pdb --select backbone --ref 0
 
