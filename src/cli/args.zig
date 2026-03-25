@@ -78,6 +78,7 @@ pub const Args = struct {
 // ============================================================================
 
 pub fn printUsage(prog: []const u8) void {
+    const name = std.fs.path.basename(prog);
     std.debug.print(
         \\Usage: {s} <command> <traj> [options]
         \\
@@ -128,7 +129,7 @@ pub fn printUsage(prog: []const u8) void {
         \\  -V, --version    Print version and exit
         \\  -h, --help       Print this help and exit
         \\
-    , .{ prog, prog, prog, prog, prog, prog });
+    , .{ name, name, name, name, name, name });
 }
 
 // ============================================================================
