@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2] - 2026-03-25
+
+### Fixed
+- #64 fix: use basename for program name in CLI help
+
+### Changed
+- #63 docs: clarify PyPI vs source installation
+
 ## [0.4.1] - 2026-03-24
 
 ### Added
