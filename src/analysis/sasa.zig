@@ -1,8 +1,13 @@
-//! Solvent Accessible Surface Area (SASA) via Shrake-Rupley algorithm.
+//! Solvent Accessible Surface Area (SASA) calculation.
 //!
-//! Wraps zsasa's Shrake-Rupley implementation with ztraj's coordinate
+//! Wraps zsasa's Shrake-Rupley implementations with ztraj's coordinate
 //! and topology conventions. Uses element-based van der Waals radii
 //! from ztraj's element table.
+//!
+//! Two algorithm variants are available:
+//! - `shrake_rupley`: Standard test-point method (default)
+//! - `shrake_rupley_bitmask`: Bitmask-optimized variant using precomputed
+//!   lookup tables for occlusion testing. Faster for large systems.
 
 const std = @import("std");
 const types = @import("../types.zig");
@@ -13,6 +18,16 @@ const AtomInput = zsasa.types.AtomInput;
 const Config = zsasa.types.Config;
 const SasaResult = zsasa.types.SasaResult;
 const shrake_rupley = zsasa.shrake_rupley;
+const shrake_rupley_bitmask = zsasa.shrake_rupley_bitmask;
+
+/// SASA algorithm variant.
+pub const Algorithm = enum {
+    /// Standard Shrake-Rupley test-point method.
+    shrake_rupley,
+    /// Bitmask-optimized Shrake-Rupley with precomputed LUT.
+    /// Faster for large systems. Requires n_points <= 1024.
+    shrake_rupley_bitmask,
+};
 
 /// SASA calculation parameters.
 pub const SasaConfig = struct {
@@ -22,6 +37,8 @@ pub const SasaConfig = struct {
     probe_radius: f64 = 1.4,
     /// Number of threads (0 = auto-detect).
     n_threads: usize = 0,
+    /// Algorithm variant. Default: shrake_rupley.
+    algorithm: Algorithm = .shrake_rupley,
 };
 
 /// SASA result owning its memory.
@@ -109,10 +126,16 @@ pub fn compute(
         .probe_radius = config.probe_radius,
     };
 
-    var result = if (config.n_threads == 1)
-        try shrake_rupley.calculateSasa(allocator, input, zsasa_config)
-    else
-        try shrake_rupley.calculateSasaParallel(allocator, input, zsasa_config, config.n_threads);
+    var result = switch (config.algorithm) {
+        .shrake_rupley => if (config.n_threads == 1)
+            try shrake_rupley.calculateSasa(allocator, input, zsasa_config)
+        else
+            try shrake_rupley.calculateSasaParallel(allocator, input, zsasa_config, config.n_threads),
+        .shrake_rupley_bitmask => if (config.n_threads == 1)
+            try shrake_rupley_bitmask.calculateSasa(allocator, input, zsasa_config)
+        else
+            try shrake_rupley_bitmask.calculateSasaParallel(allocator, input, zsasa_config, config.n_threads),
+    };
 
     // Copy atom_areas out (zsasa result owns its own copy)
     const atom_areas = try allocator.alloc(f64, n_selected);
@@ -176,6 +199,60 @@ test "sasa: single atom has expected surface area" {
     const expected = 4.0 * std.math.pi * (1.70 + 1.4) * (1.70 + 1.4);
     try std.testing.expectApproxEqRel(expected, result.total_area, 0.02);
     try std.testing.expectEqual(@as(usize, 1), result.atom_areas.len);
+}
+
+test "sasa: bitmask algorithm matches standard for single atom" {
+    const allocator = std.testing.allocator;
+
+    const x = [_]f32{0.0};
+    const y = [_]f32{0.0};
+    const z = [_]f32{0.0};
+
+    const topo_sizes = types.TopologySizes{
+        .n_atoms = 1,
+        .n_residues = 1,
+        .n_chains = 1,
+        .n_bonds = 0,
+    };
+    var topo = try types.Topology.init(allocator, topo_sizes);
+    defer topo.deinit();
+
+    topo.atoms[0] = .{
+        .name = types.FixedString(4).fromSlice("C"),
+        .element = .C,
+        .residue_index = 0,
+    };
+    topo.residues[0] = .{
+        .name = types.FixedString(5).fromSlice("ALA"),
+        .chain_index = 0,
+        .atom_range = .{ .start = 0, .len = 1 },
+        .resid = 1,
+    };
+    topo.chains[0] = .{
+        .name = types.FixedString(4).fromSlice("A"),
+        .residue_range = .{ .start = 0, .len = 1 },
+    };
+
+    // Standard SR
+    var result_sr = try compute(allocator, &x, &y, &z, topo, null, .{
+        .n_points = 960,
+        .probe_radius = 1.4,
+        .n_threads = 1,
+        .algorithm = .shrake_rupley,
+    });
+    defer result_sr.deinit();
+
+    // Bitmask SR
+    var result_bm = try compute(allocator, &x, &y, &z, topo, null, .{
+        .n_points = 960,
+        .probe_radius = 1.4,
+        .n_threads = 1,
+        .algorithm = .shrake_rupley_bitmask,
+    });
+    defer result_bm.deinit();
+
+    // Both should produce the same area (single atom = no occlusion)
+    try std.testing.expectApproxEqRel(result_sr.total_area, result_bm.total_area, 0.01);
 }
 
 test "sasa: two overlapping atoms have less than 2x isolated area" {
