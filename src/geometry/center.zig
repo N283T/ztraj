@@ -1,6 +1,9 @@
 //! Center of mass and center of geometry calculations.
 
 const std = @import("std");
+const simd = @import("../simd.zig");
+
+const vec_len_f64 = simd.optimal_vector_width.f64_width;
 
 /// Compute the center of mass for a set of atoms.
 ///
@@ -15,32 +18,91 @@ pub fn ofMass(
     masses: []const f64,
     atom_indices: ?[]const u32,
 ) [3]f64 {
+    std.debug.assert(x.len == y.len);
+    std.debug.assert(x.len == z.len);
+    std.debug.assert(x.len == masses.len);
+    if (atom_indices) |indices| {
+        return ofMassIndexed(x, y, z, masses, indices);
+    } else {
+        return ofMassAll(x, y, z, masses);
+    }
+}
+
+/// SIMD-optimized center of mass for all atoms.
+/// Accumulates in f64 vectors, loads f32 coords and widens to f64.
+fn ofMassAll(
+    x: []const f32,
+    y: []const f32,
+    z: []const f32,
+    masses: []const f64,
+) [3]f64 {
+    const n = x.len;
+    if (n == 0) return .{ 0.0, 0.0, 0.0 };
+
+    const V = vec_len_f64;
+    var sum_x: @Vector(V, f64) = @splat(0.0);
+    var sum_y: @Vector(V, f64) = @splat(0.0);
+    var sum_z: @Vector(V, f64) = @splat(0.0);
+    var sum_m: @Vector(V, f64) = @splat(0.0);
+
+    var i: usize = 0;
+    while (i + V <= n) : (i += V) {
+        const vx: @Vector(V, f32) = x[i..][0..V].*;
+        const vy: @Vector(V, f32) = y[i..][0..V].*;
+        const vz: @Vector(V, f32) = z[i..][0..V].*;
+        const vm: @Vector(V, f64) = masses[i..][0..V].*;
+
+        sum_x += vm * @as(@Vector(V, f64), @floatCast(vx));
+        sum_y += vm * @as(@Vector(V, f64), @floatCast(vy));
+        sum_z += vm * @as(@Vector(V, f64), @floatCast(vz));
+        sum_m += vm;
+    }
+
+    var rx: f64 = @reduce(.Add, sum_x);
+    var ry: f64 = @reduce(.Add, sum_y);
+    var rz: f64 = @reduce(.Add, sum_z);
+    var total_mass: f64 = @reduce(.Add, sum_m);
+
+    // Scalar tail
+    while (i < n) : (i += 1) {
+        const m = masses[i];
+        rx += m * @as(f64, x[i]);
+        ry += m * @as(f64, y[i]);
+        rz += m * @as(f64, z[i]);
+        total_mass += m;
+    }
+
+    if (total_mass == 0.0) return .{ 0.0, 0.0, 0.0 };
+
+    return .{
+        rx / total_mass,
+        ry / total_mass,
+        rz / total_mass,
+    };
+}
+
+/// Scalar center of mass for indexed subset (indirect indexing defeats SIMD).
+fn ofMassIndexed(
+    x: []const f32,
+    y: []const f32,
+    z: []const f32,
+    masses: []const f64,
+    indices: []const u32,
+) [3]f64 {
     var sum_x: f64 = 0.0;
     var sum_y: f64 = 0.0;
     var sum_z: f64 = 0.0;
     var total_mass: f64 = 0.0;
 
-    if (atom_indices) |indices| {
-        for (indices) |idx| {
-            const m = masses[idx];
-            sum_x += m * @as(f64, x[idx]);
-            sum_y += m * @as(f64, y[idx]);
-            sum_z += m * @as(f64, z[idx]);
-            total_mass += m;
-        }
-    } else {
-        for (0..x.len) |idx| {
-            const m = masses[idx];
-            sum_x += m * @as(f64, x[idx]);
-            sum_y += m * @as(f64, y[idx]);
-            sum_z += m * @as(f64, z[idx]);
-            total_mass += m;
-        }
+    for (indices) |idx| {
+        const m = masses[idx];
+        sum_x += m * @as(f64, x[idx]);
+        sum_y += m * @as(f64, y[idx]);
+        sum_z += m * @as(f64, z[idx]);
+        total_mass += m;
     }
 
-    if (total_mass == 0.0) {
-        return .{ 0.0, 0.0, 0.0 };
-    }
+    if (total_mass == 0.0) return .{ 0.0, 0.0, 0.0 };
 
     return .{
         sum_x / total_mass,
@@ -53,7 +115,6 @@ pub fn ofMass(
 ///
 /// If `atom_indices` is non-null, only the listed atom indices are used.
 /// Otherwise all atoms (0..x.len) are used.
-/// Uses f64 accumulation throughout for precision.
 /// Returns [3]f64 = {x_cog, y_cog, z_cog}.
 pub fn ofGeometry(
     x: []const f32,
@@ -61,30 +122,81 @@ pub fn ofGeometry(
     z: []const f32,
     atom_indices: ?[]const u32,
 ) [3]f64 {
+    std.debug.assert(x.len == y.len);
+    std.debug.assert(x.len == z.len);
+    if (atom_indices) |indices| {
+        return ofGeometryIndexed(x, y, z, indices);
+    } else {
+        return ofGeometryAll(x, y, z);
+    }
+}
+
+/// SIMD-optimized center of geometry for all atoms.
+/// Accumulates in f64 vectors for precision, loads f32 coords and widens to f64.
+fn ofGeometryAll(
+    x: []const f32,
+    y: []const f32,
+    z: []const f32,
+) [3]f64 {
+    const n = x.len;
+    if (n == 0) return .{ 0.0, 0.0, 0.0 };
+
+    const V = vec_len_f64;
+    var sum_x: @Vector(V, f64) = @splat(0.0);
+    var sum_y: @Vector(V, f64) = @splat(0.0);
+    var sum_z: @Vector(V, f64) = @splat(0.0);
+
+    var i: usize = 0;
+    while (i + V <= n) : (i += V) {
+        const vx: @Vector(V, f32) = x[i..][0..V].*;
+        const vy: @Vector(V, f32) = y[i..][0..V].*;
+        const vz: @Vector(V, f32) = z[i..][0..V].*;
+
+        sum_x += @as(@Vector(V, f64), @floatCast(vx));
+        sum_y += @as(@Vector(V, f64), @floatCast(vy));
+        sum_z += @as(@Vector(V, f64), @floatCast(vz));
+    }
+
+    var rx: f64 = @reduce(.Add, sum_x);
+    var ry: f64 = @reduce(.Add, sum_y);
+    var rz: f64 = @reduce(.Add, sum_z);
+
+    // Scalar tail
+    while (i < n) : (i += 1) {
+        rx += @as(f64, x[i]);
+        ry += @as(f64, y[i]);
+        rz += @as(f64, z[i]);
+    }
+
+    const count: f64 = @floatFromInt(n);
+
+    return .{
+        rx / count,
+        ry / count,
+        rz / count,
+    };
+}
+
+/// Scalar center of geometry for indexed subset (indirect indexing defeats SIMD).
+fn ofGeometryIndexed(
+    x: []const f32,
+    y: []const f32,
+    z: []const f32,
+    indices: []const u32,
+) [3]f64 {
+    if (indices.len == 0) return .{ 0.0, 0.0, 0.0 };
+
     var sum_x: f64 = 0.0;
     var sum_y: f64 = 0.0;
     var sum_z: f64 = 0.0;
-    var n: f64 = 0.0;
 
-    if (atom_indices) |indices| {
-        for (indices) |idx| {
-            sum_x += @as(f64, x[idx]);
-            sum_y += @as(f64, y[idx]);
-            sum_z += @as(f64, z[idx]);
-            n += 1.0;
-        }
-    } else {
-        for (0..x.len) |idx| {
-            sum_x += @as(f64, x[idx]);
-            sum_y += @as(f64, y[idx]);
-            sum_z += @as(f64, z[idx]);
-            n += 1.0;
-        }
+    for (indices) |idx| {
+        sum_x += @as(f64, x[idx]);
+        sum_y += @as(f64, y[idx]);
+        sum_z += @as(f64, z[idx]);
     }
 
-    if (n == 0.0) {
-        return .{ 0.0, 0.0, 0.0 };
-    }
+    const n: f64 = @floatFromInt(indices.len);
 
     return .{
         sum_x / n,
@@ -176,4 +288,52 @@ test "center: empty atoms returns zero" {
 
     try std.testing.expectEqual(@as(f64, 0.0), com[0]);
     try std.testing.expectEqual(@as(f64, 0.0), cog[0]);
+}
+
+test "large array exercises SIMD path: ofGeometry" {
+    // N=103 is not divisible by common SIMD vector widths (4, 8, 16),
+    // ensuring the scalar tail path is exercised.
+    const N = 103;
+    var x: [N]f32 = undefined;
+    var y: [N]f32 = undefined;
+    var z: [N]f32 = undefined;
+
+    for (0..N) |i| {
+        const fi: f32 = @floatFromInt(i);
+        x[i] = fi;
+        y[i] = fi * 2.0;
+        z[i] = fi * 3.0;
+    }
+
+    const cog = ofGeometry(&x, &y, &z, null);
+
+    // Mean of 0..102 = 51.0
+    try std.testing.expectApproxEqAbs(@as(f64, 51.0), cog[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 102.0), cog[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 153.0), cog[2], 1e-4);
+}
+
+test "large array exercises SIMD path: ofMass" {
+    // N=103 is not divisible by common SIMD vector widths (4, 8, 16),
+    // ensuring the scalar tail path is exercised.
+    const N = 103;
+    var x: [N]f32 = undefined;
+    var y: [N]f32 = undefined;
+    var z: [N]f32 = undefined;
+    var masses: [N]f64 = undefined;
+
+    for (0..N) |i| {
+        const fi: f32 = @floatFromInt(i);
+        x[i] = fi;
+        y[i] = fi * 2.0;
+        z[i] = fi * 3.0;
+        masses[i] = 1.0; // equal masses => COM = geometric center
+    }
+
+    const com = ofMass(&x, &y, &z, &masses, null);
+
+    // Mean of 0..102 = 51.0
+    try std.testing.expectApproxEqAbs(@as(f64, 51.0), com[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 102.0), com[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 153.0), com[2], 1e-4);
 }
