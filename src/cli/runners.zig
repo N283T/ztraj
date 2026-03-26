@@ -1040,7 +1040,8 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
     if (frames.len == 0) return error.NoFrames;
 
     const dssp_mod = ztraj.dssp;
-    const config = dssp_mod.DsspConfigT{};
+    const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
+    const config = dssp_mod.DsspConfigT{ .n_threads = n_threads };
 
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);

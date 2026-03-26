@@ -219,7 +219,7 @@ pub fn compute(
     calculateGeometry(residues, frame);
 
     // Step 7: Find near pairs and sort
-    const near_pairs = try hbond_mod.findNearPairs(residues, frame, allocator);
+    const near_pairs = try hbond_mod.findNearPairsFast(residues, frame, allocator);
     defer allocator.free(near_pairs);
 
     const PairCmp = struct {
