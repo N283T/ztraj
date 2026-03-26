@@ -2,6 +2,9 @@
 
 const std = @import("std");
 const types = @import("../types.zig");
+const simd = @import("../simd.zig");
+
+const vec_len = simd.optimal_vector_width.f64_width;
 
 /// Compute per-atom RMSF over a set of trajectory frames.
 ///
@@ -90,6 +93,224 @@ pub fn compute(
     }
 
     // Step 3: Divide by n_frames and take sqrt
+    for (result) |*v| {
+        v.* = @sqrt(v.* / n_frames);
+    }
+
+    return result;
+}
+
+/// Pass 1 worker: accumulate coordinates into thread-local sum arrays.
+fn pass1Worker(
+    frames: []const types.Frame,
+    atom_indices: ?[]const u32,
+    sum_x: []f64,
+    sum_y: []f64,
+    sum_z: []f64,
+) void {
+    const n = sum_x.len;
+    for (frames) |frame| {
+        if (atom_indices) |indices| {
+            // Indexed path: scalar only
+            for (indices, 0..) |atom_idx, i| {
+                sum_x[i] += @as(f64, frame.x[atom_idx]);
+                sum_y[i] += @as(f64, frame.y[atom_idx]);
+                sum_z[i] += @as(f64, frame.z[atom_idx]);
+            }
+        } else {
+            // Non-indexed path: SIMD vectorized
+            const V = vec_len;
+            var i: usize = 0;
+            while (i + V <= n) : (i += V) {
+                const vx: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.x[i..][0..V].*));
+                const vy: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.y[i..][0..V].*));
+                const vz: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.z[i..][0..V].*));
+                const sx: @Vector(V, f64) = sum_x[i..][0..V].*;
+                const sy: @Vector(V, f64) = sum_y[i..][0..V].*;
+                const sz: @Vector(V, f64) = sum_z[i..][0..V].*;
+                sum_x[i..][0..V].* = sx + vx;
+                sum_y[i..][0..V].* = sy + vy;
+                sum_z[i..][0..V].* = sz + vz;
+            }
+            // Scalar tail
+            while (i < n) : (i += 1) {
+                sum_x[i] += @as(f64, frame.x[i]);
+                sum_y[i] += @as(f64, frame.y[i]);
+                sum_z[i] += @as(f64, frame.z[i]);
+            }
+        }
+    }
+}
+
+/// Pass 2 worker: accumulate squared deviations from mean into thread-local msd array.
+fn pass2Worker(
+    frames: []const types.Frame,
+    atom_indices: ?[]const u32,
+    mean_x: []const f64,
+    mean_y: []const f64,
+    mean_z: []const f64,
+    msd: []f64,
+) void {
+    const n = msd.len;
+    for (frames) |frame| {
+        if (atom_indices) |indices| {
+            // Indexed path: scalar only
+            for (indices, 0..) |atom_idx, i| {
+                const dx = @as(f64, frame.x[atom_idx]) - mean_x[i];
+                const dy = @as(f64, frame.y[atom_idx]) - mean_y[i];
+                const dz = @as(f64, frame.z[atom_idx]) - mean_z[i];
+                msd[i] += dx * dx + dy * dy + dz * dz;
+            }
+        } else {
+            // Non-indexed path: SIMD vectorized
+            const V = vec_len;
+            var i: usize = 0;
+            while (i + V <= n) : (i += V) {
+                const vx: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.x[i..][0..V].*));
+                const vy: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.y[i..][0..V].*));
+                const vz: @Vector(V, f64) = @floatCast(@as(@Vector(V, f32), frame.z[i..][0..V].*));
+                const mx: @Vector(V, f64) = mean_x[i..][0..V].*;
+                const my: @Vector(V, f64) = mean_y[i..][0..V].*;
+                const mz: @Vector(V, f64) = mean_z[i..][0..V].*;
+                const dx = vx - mx;
+                const dy = vy - my;
+                const dz = vz - mz;
+                const sq = dx * dx + dy * dy + dz * dz;
+                const prev: @Vector(V, f64) = msd[i..][0..V].*;
+                msd[i..][0..V].* = prev + sq;
+            }
+            // Scalar tail
+            while (i < n) : (i += 1) {
+                const dx = @as(f64, frame.x[i]) - mean_x[i];
+                const dy = @as(f64, frame.y[i]) - mean_y[i];
+                const dz = @as(f64, frame.z[i]) - mean_z[i];
+                msd[i] += dx * dx + dy * dy + dz * dz;
+            }
+        }
+    }
+}
+
+/// Compute per-atom RMSF in parallel using multiple threads with SIMD inner loops.
+///
+/// Falls back to single-threaded `compute` when `n_threads <= 1` or
+/// `frames.len < 4`.
+///
+/// Returns a heap-allocated []f64 owned by the caller (free with `allocator`).
+pub fn computeParallel(
+    allocator: std.mem.Allocator,
+    frames: []const types.Frame,
+    atom_indices: ?[]const u32,
+    n_threads: usize,
+) ![]f64 {
+    // Fallback to single-threaded for small workloads
+    if (n_threads <= 1 or frames.len < 4) {
+        return compute(allocator, frames, atom_indices);
+    }
+
+    if (frames.len == 0) return error.NoFrames;
+
+    const n_frames: f64 = @floatFromInt(frames.len);
+    const first = frames[0];
+    const n_atoms: usize = if (atom_indices) |idx| idx.len else first.nAtoms();
+
+    const cpu_count = try std.Thread.getCpuCount();
+    const actual_threads = @min(n_threads, cpu_count);
+    // Don't use more threads than frames
+    const thread_count = @min(actual_threads, frames.len);
+
+    // Allocate thread-local sum arrays for pass 1
+    const tl_sum_x = try allocator.alloc([]f64, thread_count);
+    defer allocator.free(tl_sum_x);
+    const tl_sum_y = try allocator.alloc([]f64, thread_count);
+    defer allocator.free(tl_sum_y);
+    const tl_sum_z = try allocator.alloc([]f64, thread_count);
+    defer allocator.free(tl_sum_z);
+
+    for (0..thread_count) |t| {
+        tl_sum_x[t] = try allocator.alloc(f64, n_atoms);
+        @memset(tl_sum_x[t], 0.0);
+        tl_sum_y[t] = try allocator.alloc(f64, n_atoms);
+        @memset(tl_sum_y[t], 0.0);
+        tl_sum_z[t] = try allocator.alloc(f64, n_atoms);
+        @memset(tl_sum_z[t], 0.0);
+    }
+    defer for (0..thread_count) |t| {
+        allocator.free(tl_sum_x[t]);
+        allocator.free(tl_sum_y[t]);
+        allocator.free(tl_sum_z[t]);
+    };
+
+    // Spawn threads for pass 1 (mean positions)
+    const threads = try allocator.alloc(std.Thread, thread_count);
+    defer allocator.free(threads);
+
+    for (0..thread_count) |t| {
+        const frame_start = t * frames.len / thread_count;
+        const frame_end = (t + 1) * frames.len / thread_count;
+        threads[t] = try std.Thread.spawn(.{}, pass1Worker, .{
+            frames[frame_start..frame_end],
+            atom_indices,
+            tl_sum_x[t],
+            tl_sum_y[t],
+            tl_sum_z[t],
+        });
+    }
+    for (threads) |thread| {
+        thread.join();
+    }
+
+    // Reduce thread-local sums into mean_x/y/z (reuse tl_sum_x/y/z[0])
+    const mean_x = tl_sum_x[0];
+    const mean_y = tl_sum_y[0];
+    const mean_z = tl_sum_z[0];
+    for (1..thread_count) |t| {
+        for (0..n_atoms) |i| {
+            mean_x[i] += tl_sum_x[t][i];
+            mean_y[i] += tl_sum_y[t][i];
+            mean_z[i] += tl_sum_z[t][i];
+        }
+    }
+    for (0..n_atoms) |i| {
+        mean_x[i] /= n_frames;
+        mean_y[i] /= n_frames;
+        mean_z[i] /= n_frames;
+    }
+
+    // Allocate thread-local msd arrays for pass 2
+    const tl_msd = try allocator.alloc([]f64, thread_count);
+    defer allocator.free(tl_msd);
+    for (0..thread_count) |t| {
+        tl_msd[t] = try allocator.alloc(f64, n_atoms);
+        @memset(tl_msd[t], 0.0);
+    }
+    defer for (1..thread_count) |t| {
+        allocator.free(tl_msd[t]);
+    };
+
+    // Spawn threads for pass 2 (MSD)
+    for (0..thread_count) |t| {
+        const frame_start = t * frames.len / thread_count;
+        const frame_end = (t + 1) * frames.len / thread_count;
+        threads[t] = try std.Thread.spawn(.{}, pass2Worker, .{
+            frames[frame_start..frame_end],
+            atom_indices,
+            mean_x,
+            mean_y,
+            mean_z,
+            tl_msd[t],
+        });
+    }
+    for (threads) |thread| {
+        thread.join();
+    }
+
+    // Reduce MSD and compute final result; reuse tl_msd[0] as output
+    const result = tl_msd[0];
+    for (1..thread_count) |t| {
+        for (0..n_atoms) |i| {
+            result[i] += tl_msd[t][i];
+        }
+    }
     for (result) |*v| {
         v.* = @sqrt(v.* / n_frames);
     }
@@ -202,4 +423,52 @@ test "rmsf: error on empty frames" {
     const frames = [_]types.Frame{};
     const result = compute(allocator, &frames, null);
     try std.testing.expectError(error.NoFrames, result);
+}
+
+test "rmsf: computeParallel matches single-threaded compute" {
+    const allocator = std.testing.allocator;
+
+    // 5 atoms, 8 frames with varying positions
+    const n_frames = 8;
+    const n_atoms = 5;
+
+    var frames: [n_frames]types.Frame = undefined;
+    for (&frames, 0..) |*f, fi| {
+        f.* = try types.Frame.init(allocator, n_atoms);
+        const t: f32 = @floatFromInt(fi);
+        for (0..n_atoms) |a| {
+            const ai: f32 = @floatFromInt(a);
+            // Varying positions: each atom oscillates differently per frame
+            f.x[a] = ai * 1.5 + @sin(t * 0.7 + ai);
+            f.y[a] = ai * 0.8 - @cos(t * 1.1 + ai * 0.5);
+            f.z[a] = (t - 4.0) * (ai + 1.0) * 0.3;
+        }
+    }
+    defer for (&frames) |*f| f.deinit();
+
+    // Single-threaded reference
+    const ref = try compute(allocator, &frames, null);
+    defer allocator.free(ref);
+
+    // Multi-threaded (4 threads)
+    const par = try computeParallel(allocator, &frames, null, 4);
+    defer allocator.free(par);
+
+    try std.testing.expectEqual(ref.len, par.len);
+    for (ref, par) |r, p| {
+        try std.testing.expectApproxEqAbs(r, p, 1e-10);
+    }
+
+    // Also test with atom_indices
+    const indices = [_]u32{ 0, 2, 4 };
+    const ref_idx = try compute(allocator, &frames, &indices);
+    defer allocator.free(ref_idx);
+
+    const par_idx = try computeParallel(allocator, &frames, &indices, 4);
+    defer allocator.free(par_idx);
+
+    try std.testing.expectEqual(ref_idx.len, par_idx.len);
+    for (ref_idx, par_idx) |r, p| {
+        try std.testing.expectApproxEqAbs(r, p, 1e-10);
+    }
 }
