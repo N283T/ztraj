@@ -270,6 +270,7 @@ pub fn computeParallel(
     for (threads) |thread| {
         thread.join();
     }
+    pass1_spawned = 0;
 
     // Reduce thread-local sums into mean_x/y/z (reuse tl_sum_x/y/z[0])
     const mean_x = tl_sum_x[0];
@@ -299,6 +300,7 @@ pub fn computeParallel(
     defer for (1..thread_count) |t| {
         if (tl_msd[t].len > 0) allocator.free(tl_msd[t]);
     };
+    errdefer if (tl_msd[0].len > 0) allocator.free(tl_msd[0]);
 
     for (0..thread_count) |t| {
         tl_msd[t] = try allocator.alloc(f64, n_atoms);
@@ -326,6 +328,7 @@ pub fn computeParallel(
     for (threads) |thread| {
         thread.join();
     }
+    pass2_spawned = 0;
 
     // Reduce MSD and compute final result; reuse tl_msd[0] as output
     const result = tl_msd[0];

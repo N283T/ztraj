@@ -1195,8 +1195,10 @@ export fn ztraj_compute_contacts(
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
     const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
-    const contacts = contacts_mod.computeParallel(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff, thread_count) catch {
-        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    const contacts = contacts_mod.computeParallel(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff, thread_count) catch |err| {
+        return switch (err) {
+            error.OutOfMemory, error.SystemResources, error.ThreadQuotaExceeded, error.LockedMemoryLimitExceeded, error.Unexpected => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
     };
     defer c_allocator.free(contacts);
 

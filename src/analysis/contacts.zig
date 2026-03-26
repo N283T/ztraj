@@ -264,6 +264,7 @@ pub fn computeParallel(
     for (threads[0..spawned]) |thread| {
         thread.join();
     }
+    spawned = 0;
 
     // Check for OOM in any worker.
     for (0..thread_count) |t| {
