@@ -8,6 +8,9 @@
 //! after finding the largest eigenvalue via Newton-Raphson (same as rmsd.zig).
 
 const std = @import("std");
+const simd_mod = @import("../simd.zig");
+
+const vec_len = simd_mod.optimal_vector_width.f64_width;
 
 /// Superposition result: aligned coordinates and RMSD.
 pub const SuperposeResult = struct {
@@ -79,13 +82,46 @@ pub fn superpose(
             mob_cz += @as(f64, mob_z[idx]);
         }
     } else {
-        for (0..n_all) |idx| {
-            ref_cx += @as(f64, ref_x[idx]);
-            ref_cy += @as(f64, ref_y[idx]);
-            ref_cz += @as(f64, ref_z[idx]);
-            mob_cx += @as(f64, mob_x[idx]);
-            mob_cy += @as(f64, mob_y[idx]);
-            mob_cz += @as(f64, mob_z[idx]);
+        const V = vec_len;
+        var v_ref_cx: @Vector(V, f64) = @splat(0.0);
+        var v_ref_cy: @Vector(V, f64) = @splat(0.0);
+        var v_ref_cz: @Vector(V, f64) = @splat(0.0);
+        var v_mob_cx: @Vector(V, f64) = @splat(0.0);
+        var v_mob_cy: @Vector(V, f64) = @splat(0.0);
+        var v_mob_cz: @Vector(V, f64) = @splat(0.0);
+
+        var i: usize = 0;
+        while (i + V <= n_all) : (i += V) {
+            const vrx: @Vector(V, f32) = ref_x[i..][0..V].*;
+            const vry: @Vector(V, f32) = ref_y[i..][0..V].*;
+            const vrz: @Vector(V, f32) = ref_z[i..][0..V].*;
+            const vmx: @Vector(V, f32) = mob_x[i..][0..V].*;
+            const vmy: @Vector(V, f32) = mob_y[i..][0..V].*;
+            const vmz: @Vector(V, f32) = mob_z[i..][0..V].*;
+
+            v_ref_cx += @as(@Vector(V, f64), @floatCast(vrx));
+            v_ref_cy += @as(@Vector(V, f64), @floatCast(vry));
+            v_ref_cz += @as(@Vector(V, f64), @floatCast(vrz));
+            v_mob_cx += @as(@Vector(V, f64), @floatCast(vmx));
+            v_mob_cy += @as(@Vector(V, f64), @floatCast(vmy));
+            v_mob_cz += @as(@Vector(V, f64), @floatCast(vmz));
+        }
+
+        ref_cx = @reduce(.Add, v_ref_cx);
+        ref_cy = @reduce(.Add, v_ref_cy);
+        ref_cz = @reduce(.Add, v_ref_cz);
+        mob_cx = @reduce(.Add, v_mob_cx);
+        mob_cy = @reduce(.Add, v_mob_cy);
+        mob_cz = @reduce(.Add, v_mob_cz);
+
+        // Scalar tail
+        while (i < n_all) : (i += 1) {
+            ref_cx += @as(f64, ref_x[i]);
+            ref_cy += @as(f64, ref_y[i]);
+            ref_cz += @as(f64, ref_z[i]);
+            mob_cx += @as(f64, mob_x[i]);
+            mob_cy += @as(f64, mob_y[i]);
+            mob_cz += @as(f64, mob_z[i]);
         }
     }
     ref_cx /= n_f;
@@ -130,15 +166,79 @@ pub fn superpose(
             szz += rz * mz;
         }
     } else {
-        for (0..n_all) |idx| {
-            const rx = @as(f64, ref_x[idx]) - ref_cx;
-            const ry = @as(f64, ref_y[idx]) - ref_cy;
-            const rz = @as(f64, ref_z[idx]) - ref_cz;
-            const mx = @as(f64, mob_x[idx]) - mob_cx;
-            const my = @as(f64, mob_y[idx]) - mob_cy;
-            const mz = @as(f64, mob_z[idx]) - mob_cz;
+        const V = vec_len;
+        // Broadcast center values
+        const splat_ref_cx: @Vector(V, f64) = @splat(ref_cx);
+        const splat_ref_cy: @Vector(V, f64) = @splat(ref_cy);
+        const splat_ref_cz: @Vector(V, f64) = @splat(ref_cz);
+        const splat_mob_cx: @Vector(V, f64) = @splat(mob_cx);
+        const splat_mob_cy: @Vector(V, f64) = @splat(mob_cy);
+        const splat_mob_cz: @Vector(V, f64) = @splat(mob_cz);
+
+        // 11 SIMD accumulators: 9 S-matrix + 2 G values
+        var v_sxx: @Vector(V, f64) = @splat(0.0);
+        var v_sxy: @Vector(V, f64) = @splat(0.0);
+        var v_sxz: @Vector(V, f64) = @splat(0.0);
+        var v_syx: @Vector(V, f64) = @splat(0.0);
+        var v_syy: @Vector(V, f64) = @splat(0.0);
+        var v_syz: @Vector(V, f64) = @splat(0.0);
+        var v_szx: @Vector(V, f64) = @splat(0.0);
+        var v_szy: @Vector(V, f64) = @splat(0.0);
+        var v_szz: @Vector(V, f64) = @splat(0.0);
+        var v_g_ref: @Vector(V, f64) = @splat(0.0);
+        var v_g_mob: @Vector(V, f64) = @splat(0.0);
+
+        var i: usize = 0;
+        while (i + V <= n_all) : (i += V) {
+            // Load f32 coords and widen to f64
+            const vrx: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_x[i..][0..V].*))) - splat_ref_cx;
+            const vry: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_y[i..][0..V].*))) - splat_ref_cy;
+            const vrz: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_z[i..][0..V].*))) - splat_ref_cz;
+            const vmx: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_x[i..][0..V].*))) - splat_mob_cx;
+            const vmy: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_y[i..][0..V].*))) - splat_mob_cy;
+            const vmz: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_z[i..][0..V].*))) - splat_mob_cz;
+
+            // G values
+            v_g_ref += vrx * vrx + vry * vry + vrz * vrz;
+            v_g_mob += vmx * vmx + vmy * vmy + vmz * vmz;
+
+            // S-matrix cross products
+            v_sxx += vrx * vmx;
+            v_sxy += vrx * vmy;
+            v_sxz += vrx * vmz;
+            v_syx += vry * vmx;
+            v_syy += vry * vmy;
+            v_syz += vry * vmz;
+            v_szx += vrz * vmx;
+            v_szy += vrz * vmy;
+            v_szz += vrz * vmz;
+        }
+
+        // Reduce all 11 accumulators
+        sxx = @reduce(.Add, v_sxx);
+        sxy = @reduce(.Add, v_sxy);
+        sxz = @reduce(.Add, v_sxz);
+        syx = @reduce(.Add, v_syx);
+        syy = @reduce(.Add, v_syy);
+        syz = @reduce(.Add, v_syz);
+        szx = @reduce(.Add, v_szx);
+        szy = @reduce(.Add, v_szy);
+        szz = @reduce(.Add, v_szz);
+        g_ref = @reduce(.Add, v_g_ref);
+        g_mob = @reduce(.Add, v_g_mob);
+
+        // Scalar tail
+        while (i < n_all) : (i += 1) {
+            const rx = @as(f64, ref_x[i]) - ref_cx;
+            const ry = @as(f64, ref_y[i]) - ref_cy;
+            const rz = @as(f64, ref_z[i]) - ref_cz;
+            const mx = @as(f64, mob_x[i]) - mob_cx;
+            const my = @as(f64, mob_y[i]) - mob_cy;
+            const mz = @as(f64, mob_z[i]) - mob_cz;
+
             g_ref += rx * rx + ry * ry + rz * rz;
             g_mob += mx * mx + my * my + mz * mz;
+
             sxx += rx * mx;
             sxy += rx * my;
             sxz += rx * mz;
@@ -239,14 +339,54 @@ pub fn superpose(
     const out_z = try allocator.alloc(f32, n_all);
     errdefer allocator.free(out_z);
 
-    for (0..n_all) |i| {
-        const cx = @as(f64, mob_x[i]) - mob_cx;
-        const cy = @as(f64, mob_y[i]) - mob_cy;
-        const cz = @as(f64, mob_z[i]) - mob_cz;
+    // SIMD rotation application
+    {
+        const V = vec_len;
+        // Broadcast rotation matrix elements and centers
+        const s_r00: @Vector(V, f64) = @splat(r00);
+        const s_r01: @Vector(V, f64) = @splat(r01);
+        const s_r02: @Vector(V, f64) = @splat(r02);
+        const s_r10: @Vector(V, f64) = @splat(r10);
+        const s_r11: @Vector(V, f64) = @splat(r11);
+        const s_r12: @Vector(V, f64) = @splat(r12);
+        const s_r20: @Vector(V, f64) = @splat(r20);
+        const s_r21: @Vector(V, f64) = @splat(r21);
+        const s_r22: @Vector(V, f64) = @splat(r22);
+        const s_mob_cx: @Vector(V, f64) = @splat(mob_cx);
+        const s_mob_cy: @Vector(V, f64) = @splat(mob_cy);
+        const s_mob_cz: @Vector(V, f64) = @splat(mob_cz);
+        const s_ref_cx: @Vector(V, f64) = @splat(ref_cx);
+        const s_ref_cy: @Vector(V, f64) = @splat(ref_cy);
+        const s_ref_cz: @Vector(V, f64) = @splat(ref_cz);
 
-        out_x[i] = @floatCast(r00 * cx + r01 * cy + r02 * cz + ref_cx);
-        out_y[i] = @floatCast(r10 * cx + r11 * cy + r12 * cz + ref_cy);
-        out_z[i] = @floatCast(r20 * cx + r21 * cy + r22 * cz + ref_cz);
+        var i: usize = 0;
+        while (i + V <= n_all) : (i += V) {
+            // Load f32 mob coords, widen to f64, subtract mob center
+            const cx: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_x[i..][0..V].*))) - s_mob_cx;
+            const cy: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_y[i..][0..V].*))) - s_mob_cy;
+            const cz: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), mob_z[i..][0..V].*))) - s_mob_cz;
+
+            // 3 multiply-add chains for rotation + translation
+            const nx = s_r00 * cx + s_r01 * cy + s_r02 * cz + s_ref_cx;
+            const ny = s_r10 * cx + s_r11 * cy + s_r12 * cz + s_ref_cy;
+            const nz = s_r20 * cx + s_r21 * cy + s_r22 * cz + s_ref_cz;
+
+            // Narrow f64→f32 and store
+            out_x[i..][0..V].* = @floatCast(nx);
+            out_y[i..][0..V].* = @floatCast(ny);
+            out_z[i..][0..V].* = @floatCast(nz);
+        }
+
+        // Scalar tail
+        while (i < n_all) : (i += 1) {
+            const cx = @as(f64, mob_x[i]) - mob_cx;
+            const cy = @as(f64, mob_y[i]) - mob_cy;
+            const cz = @as(f64, mob_z[i]) - mob_cz;
+
+            out_x[i] = @floatCast(r00 * cx + r01 * cy + r02 * cz + ref_cx);
+            out_y[i] = @floatCast(r10 * cx + r11 * cy + r12 * cz + ref_cy);
+            out_z[i] = @floatCast(r20 * cx + r21 * cy + r22 * cz + ref_cz);
+        }
     }
 
     return .{ .x = out_x, .y = out_y, .z = out_z, .rmsd = rmsd, .allocator = allocator };
@@ -342,5 +482,41 @@ test "superpose: 90-degree rotation around z-axis" {
         try std.testing.expectApproxEqAbs(ref_x[i], result.x[i], 1e-3);
         try std.testing.expectApproxEqAbs(ref_y[i], result.y[i], 1e-3);
         try std.testing.expectApproxEqAbs(ref_z[i], result.z[i], 1e-3);
+    }
+}
+
+test "superpose: large array exercises SIMD rotation path" {
+    const allocator = std.testing.allocator;
+    const N = 100;
+    var ref_x_arr: [N]f32 = undefined;
+    var ref_y_arr: [N]f32 = undefined;
+    var ref_z_arr: [N]f32 = undefined;
+    var mob_x_arr: [N]f32 = undefined;
+    var mob_y_arr: [N]f32 = undefined;
+    var mob_z_arr: [N]f32 = undefined;
+
+    for (0..N) |j| {
+        const fj: f32 = @floatFromInt(j);
+        // Reference: helix-like pattern
+        ref_x_arr[j] = fj * 1.5;
+        ref_y_arr[j] = @sin(fj * 0.1) * 5.0;
+        ref_z_arr[j] = @cos(fj * 0.1) * 5.0;
+        // Mobile: same but translated by (10, -5, 3)
+        mob_x_arr[j] = ref_x_arr[j] + 10.0;
+        mob_y_arr[j] = ref_y_arr[j] - 5.0;
+        mob_z_arr[j] = ref_z_arr[j] + 3.0;
+    }
+
+    var result = try superpose(allocator, &ref_x_arr, &ref_y_arr, &ref_z_arr, &mob_x_arr, &mob_y_arr, &mob_z_arr, null);
+    defer result.deinit();
+
+    // Pure translation => RMSD should be 0
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), result.rmsd, 1e-6);
+
+    // Aligned coords should match reference
+    for (0..N) |j| {
+        try std.testing.expectApproxEqAbs(ref_x_arr[j], result.x[j], 1e-3);
+        try std.testing.expectApproxEqAbs(ref_y_arr[j], result.y[j], 1e-3);
+        try std.testing.expectApproxEqAbs(ref_z_arr[j], result.z[j], 1e-3);
     }
 }
