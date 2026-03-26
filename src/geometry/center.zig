@@ -3,7 +3,6 @@
 const std = @import("std");
 const simd = @import("../simd.zig");
 
-const vec_len_f32 = simd.optimal_vector_width.f32_width;
 const vec_len_f64 = simd.optimal_vector_width.f64_width;
 
 /// Compute the center of mass for a set of atoms.
@@ -315,7 +314,9 @@ test "large array exercises SIMD path: ofGeometry" {
 }
 
 test "large array exercises SIMD path: ofMass" {
-    const N = 100;
+    // N=103 is not divisible by common SIMD vector widths (4, 8, 16),
+    // ensuring the scalar tail path is exercised.
+    const N = 103;
     var x: [N]f32 = undefined;
     var y: [N]f32 = undefined;
     var z: [N]f32 = undefined;
@@ -331,8 +332,8 @@ test "large array exercises SIMD path: ofMass" {
 
     const com = ofMass(&x, &y, &z, &masses, null);
 
-    // Mean of 0..99 = 49.5
-    try std.testing.expectApproxEqAbs(@as(f64, 49.5), com[0], 1e-4);
-    try std.testing.expectApproxEqAbs(@as(f64, 99.0), com[1], 1e-4);
-    try std.testing.expectApproxEqAbs(@as(f64, 148.5), com[2], 1e-4);
+    // Mean of 0..102 = 51.0
+    try std.testing.expectApproxEqAbs(@as(f64, 51.0), com[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 102.0), com[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 153.0), com[2], 1e-4);
 }

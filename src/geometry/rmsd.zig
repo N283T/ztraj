@@ -24,6 +24,12 @@ pub fn compute(
     z: []const f32,
     atom_indices: ?[]const u32,
 ) f64 {
+    std.debug.assert(ref_x.len == ref_y.len);
+    std.debug.assert(ref_x.len == ref_z.len);
+    std.debug.assert(ref_x.len == x.len);
+    std.debug.assert(ref_x.len == y.len);
+    std.debug.assert(ref_x.len == z.len);
+
     // Collect the atoms we care about
     const n: f64 = if (atom_indices) |idx| @floatFromInt(idx.len) else @floatFromInt(ref_x.len);
     if (n == 0.0) return 0.0;
@@ -368,9 +374,9 @@ test "rmsd: zero atoms" {
 }
 
 test "rmsd: large array exercises SIMD path" {
-    // N=100 atoms, not divisible by all common SIMD widths,
-    // ensuring both SIMD main loop and scalar tail are exercised.
-    const N = 100;
+    // N=103 is not divisible by common SIMD vector widths (2, 4, 8, 16),
+    // ensuring the scalar tail path is exercised on all platforms.
+    const N = 103;
     var ref_x: [N]f32 = undefined;
     var ref_y: [N]f32 = undefined;
     var ref_z: [N]f32 = undefined;

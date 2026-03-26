@@ -8,9 +8,9 @@
 //! after finding the largest eigenvalue via Newton-Raphson (same as rmsd.zig).
 
 const std = @import("std");
-const simd_mod = @import("../simd.zig");
+const simd = @import("../simd.zig");
 
-const vec_len = simd_mod.optimal_vector_width.f64_width;
+const vec_len = simd.optimal_vector_width.f64_width;
 
 /// Superposition result: aligned coordinates and RMSD.
 pub const SuperposeResult = struct {
@@ -487,7 +487,9 @@ test "superpose: 90-degree rotation around z-axis" {
 
 test "superpose: large array exercises SIMD rotation path" {
     const allocator = std.testing.allocator;
-    const N = 100;
+    // N=103 is not divisible by common SIMD vector widths (2, 4, 8, 16),
+    // ensuring the scalar tail path is exercised on all platforms.
+    const N = 103;
     var ref_x_arr: [N]f32 = undefined;
     var ref_y_arr: [N]f32 = undefined;
     var ref_z_arr: [N]f32 = undefined;

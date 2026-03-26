@@ -11,7 +11,7 @@ const vec_len = simd.optimal_vector_width.f64_width;
 ///   result[k] = sqrt((x[j]-x[i])^2 + (y[j]-y[i])^2 + (z[j]-z[i])^2)
 ///
 /// Uses f64 intermediate precision to minimize floating-point error.
-/// SIMD vectorized: processes `vec_len` pairs at a time with gathered loads.
+/// SIMD vectorized: processes `vec_len` pairs at a time with scalar-to-vector packing.
 /// `result` must have the same length as `pairs`.
 pub fn compute(
     x: []const f32,
