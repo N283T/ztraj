@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0] - 2026-03-26
+
+### Added
+- #68 Multi-threading for distances, RMSF, contacts with `--threads` CLI flag
+- #69 Multi-threading for RDF, MSD, hydrogen bonds
+- #70 Multi-threading for PCA covariance matrix
+- #71 SASA bitmask algorithm option (`shrake_rupley_bitmask`)
+- #73 Expose SASA bitmask algorithm in C API and Python (`algorithm` parameter)
+
+### Performance
+- #67 SIMD vectorize geometry modules (center, rg, distances, rmsd, superpose)
+- #68 SIMD inner loop for RMSF computation
+- #69 SIMD inner loops for RDF distance computation and MSD displacement
+- #70 SIMD outer product vectorization for PCA covariance matrix
+- #70 DSSP near-pair finding reduced from O(n_res^2) to O(n_res) via cell-list spatial indexing
+- #72 Spatial cell list for hydrogen bond acceptor lookup (50-100x for large proteins)
+- #72 SIMD batch distance testing in neighbor list construction
+
+### Changed
+- #66 Update GitHub Actions to Node.js 24
+
 ## [0.4.2] - 2026-03-25
 
 ### Fixed
