@@ -153,3 +153,16 @@ pub fn loadAllFrames(
 
     return frames.toOwnedSlice(allocator);
 }
+
+/// Convenience wrapper: creates a "Loading frames" progress node, loads all
+/// frames, and ends the node automatically via defer.
+pub fn loadAllFramesWithProgress(
+    allocator: std.mem.Allocator,
+    traj_path: []const u8,
+    n_atoms: usize,
+    progress_root: std.Progress.Node,
+) ![]types.Frame {
+    const load_node = progress_root.start("Loading frames", 0);
+    defer load_node.end();
+    return loadAllFrames(allocator, traj_path, n_atoms, load_node);
+}
