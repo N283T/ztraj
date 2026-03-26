@@ -131,7 +131,7 @@ _CDEF = """
     int ztraj_pca_covariance(const float* all_x, const float* all_y, const float* all_z,
                              size_t n_frames, size_t n_atoms,
                              const uint32_t* atom_indices, size_t n_indices,
-                             double* cov_out);
+                             double* cov_out, uint32_t n_threads);
 
     // PBC
     int ztraj_wrap_coords(float* x, float* y, float* z,
@@ -169,7 +169,8 @@ _CDEF = """
 
     // DSSP
     int ztraj_compute_dssp(void* handle, const float* x, const float* y, const float* z,
-                           size_t n_atoms, uint8_t* result, size_t* n_residues_out);
+                           size_t n_atoms, uint8_t* result, size_t* n_residues_out,
+                           uint32_t n_threads);
 
     // File writers: structure
     int ztraj_write_pdb(void* handle, const float* x, const float* y, const float* z,

@@ -464,6 +464,7 @@ def compute_pca(
             idx_ptr,
             n_indices,
             _ptr_f64(cov_flat),
+            0,  # n_threads=0 → auto-detect
         ),
         "compute_pca",
     )
@@ -527,6 +528,7 @@ def compute_dssp(
                 n_atoms,
                 result_buf,
                 n_res_out,
+                0,  # n_threads=0 → auto-detect
             ),
             "compute_dssp",
         )

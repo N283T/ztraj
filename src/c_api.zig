@@ -1385,6 +1385,7 @@ export fn ztraj_pca_covariance(
     atom_indices: ?[*]const u32,
     n_indices: usize,
     cov_out: [*]f64,
+    n_threads: u32,
 ) callconv(.c) c_int {
     if (n_frames < 2 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
 
@@ -1406,10 +1407,11 @@ export fn ztraj_pca_covariance(
         );
     }
 
-    const cov = pca_mod.computeCovarianceMatrix(c_allocator, frames, indices) catch |err| {
+    const threads: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @as(usize, n_threads);
+    const cov = pca_mod.computeCovarianceMatrixParallel(c_allocator, frames, indices, threads) catch |err| {
         return switch (err) {
             error.TooFewFrames, error.IndexOutOfBounds, error.DimensionTooLarge => ZTRAJ_ERROR_INVALID_INPUT,
-            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            error.OutOfMemory, error.LockedMemoryLimitExceeded, error.SystemResources, error.Unexpected, error.ThreadQuotaExceeded => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
     };
     defer c_allocator.free(cov);
@@ -1635,6 +1637,7 @@ export fn ztraj_compute_dssp(
     n_atoms: usize,
     result: [*]u8,
     n_residues_out: *usize,
+    n_threads: u32,
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
@@ -1642,7 +1645,7 @@ export fn ztraj_compute_dssp(
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
-    var dssp_result = dssp_mod.compute(c_allocator, topo, frame, .{}) catch {
+    var dssp_result = dssp_mod.compute(c_allocator, topo, frame, .{ .n_threads = @as(usize, n_threads) }) catch {
         // Fill with spaces (loop) for residues that couldn't be assigned
         @memset(result[0..topo.residues.len], ' ');
         return ZTRAJ_OK;
