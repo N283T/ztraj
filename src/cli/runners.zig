@@ -542,6 +542,8 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
         .angle_cutoff = args.hbond_angle_cutoff,
     };
 
+    const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
+
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
     const w = buf.writer(allocator);
@@ -550,7 +552,7 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
         .json => {
             try w.writeAll("[\n");
             for (frames, 0..) |frame, fi| {
-                const bonds = try analysis.hbonds.detect(allocator, parsed.topology, frame, cfg);
+                const bonds = try analysis.hbonds.detectParallel(allocator, parsed.topology, frame, cfg, n_threads);
                 defer allocator.free(bonds);
                 if (fi > 0) try w.writeAll(",\n");
                 try w.print("  {{\"frame\": {d}, \"hbonds\": [", .{fi});
@@ -569,7 +571,7 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
             const delim: u8 = if (args.format == .csv) ',' else '\t';
             try w.print("frame{c}donor{c}hydrogen{c}acceptor{c}distance{c}angle\n", .{ delim, delim, delim, delim, delim });
             for (frames, 0..) |frame, fi| {
-                const bonds = try analysis.hbonds.detect(allocator, parsed.topology, frame, cfg);
+                const bonds = try analysis.hbonds.detectParallel(allocator, parsed.topology, frame, cfg, n_threads);
                 defer allocator.free(bonds);
                 for (bonds) |hb| {
                     try w.print("{d}{c}{d}{c}{d}{c}{d}{c}{d:.4}{c}{d:.4}\n", .{
@@ -707,6 +709,8 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(accumulated_gr);
     @memset(accumulated_gr, 0.0);
 
+    const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
+
     for (frames) |frame| {
         const n1: usize = if (idx1) |ai| ai.len else frame.nAtoms();
         const n2: usize = if (idx2) |ai| ai.len else frame.nAtoms();
@@ -779,7 +783,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
             std.process.exit(1);
         };
 
-        var result = try analysis.rdf.compute(
+        var result = try analysis.rdf.computeParallel(
             allocator,
             s1x,
             s1y,
@@ -789,6 +793,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
             s2z,
             box_vol,
             cfg,
+            n_threads,
         );
         defer result.deinit();
 
@@ -970,7 +975,7 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
         sasa_vals[fi] = sasa_result.total_area;
 
         // Hbonds count
-        const hbonds = try analysis.hbonds.detect(allocator, parsed.topology, frame, hbonds_cfg);
+        const hbonds = try analysis.hbonds.detectParallel(allocator, parsed.topology, frame, hbonds_cfg, n_threads);
         defer allocator.free(hbonds);
         n_hbonds[fi] = @floatFromInt(hbonds.len);
 

@@ -98,7 +98,7 @@ _CDEF = """
                   const float* sel2_x, const float* sel2_y, const float* sel2_z,
                   size_t n_sel2,
                   double box_volume, float r_min, float r_max, uint32_t n_bins,
-                  double* r_out, double* g_r_out);
+                  double* r_out, double* g_r_out, uint32_t n_threads);
 
     // Analysis: Hydrogen Bonds
     typedef struct { uint32_t donor; uint32_t hydrogen; uint32_t acceptor;
@@ -106,7 +106,8 @@ _CDEF = """
     int ztraj_detect_hbonds(void* structure_handle,
                             const float* x, const float* y, const float* z,
                             size_t n_atoms, float dist_cutoff, float angle_cutoff,
-                            CHBond* hbonds_out, size_t capacity, size_t* n_found);
+                            CHBond* hbonds_out, size_t capacity, size_t* n_found,
+                            uint32_t n_threads);
 
     // Analysis: Contacts
     #define ZTRAJ_SCHEME_CLOSEST 0
@@ -124,7 +125,7 @@ _CDEF = """
     int ztraj_msd(const float* all_x, const float* all_y, const float* all_z,
                   size_t n_frames, size_t n_atoms,
                   const uint32_t* atom_indices, size_t n_indices,
-                  double* result);
+                  double* result, uint32_t n_threads);
 
     // PCA
     int ztraj_pca_covariance(const float* all_x, const float* all_y, const float* all_z,

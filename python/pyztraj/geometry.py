@@ -535,12 +535,14 @@ def make_molecules_whole(
 def compute_msd(
     frames: list[NDArray[np.float32]],
     atom_indices: NDArray[np.uint32] | None = None,
+    n_threads: int = 0,
 ) -> NDArray[np.float64]:
     """Compute Mean Square Displacement as a function of lag time.
 
     Args:
         frames: List of (n_atoms, 3) coordinate arrays.
         atom_indices: Optional subset of atom indices.
+        n_threads: Number of threads (0 = auto-detect). Default 0.
 
     Returns:
         (n_frames,) MSD values in Å².
@@ -572,6 +574,7 @@ def compute_msd(
             idx_ptr,
             n_indices,
             _ptr_f64(result),
+            n_threads,
         ),
         "compute_msd",
     )

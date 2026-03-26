@@ -31,6 +31,7 @@ def compute_rdf(
     r_min: float = 0.0,
     r_max: float = 10.0,
     n_bins: int = 100,
+    n_threads: int = 0,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Compute radial distribution function g(r) between two atom selections.
 
@@ -41,6 +42,7 @@ def compute_rdf(
         r_min: Minimum distance (Angstroms). Default 0.0.
         r_max: Maximum distance (Angstroms). Default 10.0.
         n_bins: Number of histogram bins. Default 100.
+        n_threads: Number of threads (0 = auto-detect). Default 0.
 
     Returns:
         Tuple of (r, g_r) arrays, each of length n_bins.
@@ -67,6 +69,7 @@ def compute_rdf(
             n_bins,
             _ptr_f64(r_out),
             _ptr_f64(g_r_out),
+            n_threads,
         ),
         "compute_rdf",
     )
@@ -90,6 +93,7 @@ def detect_hbonds(
     dist_cutoff: float = 2.5,
     angle_cutoff: float = 120.0,
     *,
+    n_threads: int = 0,
     _handle: object = None,
 ) -> list[HBond]:
     """Detect hydrogen bonds using Baker-Hubbard criteria.
@@ -99,6 +103,7 @@ def detect_hbonds(
         coords: (n_atoms, 3) coordinates for the frame to analyze.
         dist_cutoff: Maximum H...A distance in Angstroms. Default 2.5.
         angle_cutoff: Minimum D-H...A angle in degrees. Default 120.0.
+        n_threads: Number of threads (0 = auto-detect). Default 0.
 
     Returns:
         List of HBond objects.
@@ -131,6 +136,7 @@ def detect_hbonds(
                 hbonds_buf,
                 capacity,
                 n_found,
+                n_threads,
             ),
             "detect_hbonds",
         )
@@ -151,6 +157,7 @@ def detect_hbonds(
                     hbonds_buf,
                     actual,
                     n_found,
+                    n_threads,
                 ),
                 "detect_hbonds",
             )
