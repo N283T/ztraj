@@ -366,6 +366,7 @@ def compute_principal_moments(tensor: NDArray[np.float64]) -> NDArray[np.float64
 def compute_rmsf(
     frames: list[NDArray[np.float32]],
     atom_indices: NDArray[np.uint32] | None = None,
+    n_threads: int = 0,
 ) -> NDArray[np.float64]:
     """Compute per-atom RMSF over multiple frames.
 
@@ -407,6 +408,7 @@ def compute_rmsf(
             idx_ptr,
             n_indices,
             _ptr_f64(result),
+            n_threads,
         ),
         "compute_rmsf",
     )

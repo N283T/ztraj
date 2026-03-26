@@ -183,6 +183,7 @@ def compute_contacts(
     coords: NDArray[np.float32],
     cutoff: float = 4.5,
     scheme: str = "closest_heavy",
+    n_threads: int = 0,
 ) -> list[Contact]:
     """Compute residue-residue contacts.
 
@@ -230,6 +231,7 @@ def compute_contacts(
                 contacts_buf,
                 capacity,
                 n_found,
+                n_threads,
             ),
             "compute_contacts",
         )
@@ -250,6 +252,7 @@ def compute_contacts(
                     contacts_buf,
                     actual,
                     n_found,
+                    n_threads,
                 ),
                 "compute_contacts",
             )

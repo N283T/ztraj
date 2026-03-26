@@ -140,6 +140,159 @@ pub fn compute(
 }
 
 // ============================================================================
+// Parallel implementation
+// ============================================================================
+
+/// Worker function for parallel contact computation.
+/// Each worker handles interleaved (round-robin) outer residue indices
+/// to balance the triangular workload across threads.
+fn contactWorker(
+    topology: types.Topology,
+    frame: types.Frame,
+    scheme: Scheme,
+    cutoff: f32,
+    thread_id: usize,
+    thread_count: usize,
+    result: *std.ArrayList(Contact),
+    allocator: std.mem.Allocator,
+    had_oom: *bool,
+) void {
+    const n_res = topology.residues.len;
+    var ri_raw: usize = thread_id;
+    while (ri_raw < n_res) : (ri_raw += thread_count) {
+        for (ri_raw + 1..n_res) |rj_raw| {
+            const ri: u32 = @intCast(ri_raw);
+            const rj: u32 = @intCast(rj_raw);
+
+            const dist = residueDistance(
+                topology,
+                frame,
+                topology.residues[ri],
+                topology.residues[rj],
+                scheme,
+            ) orelse continue;
+
+            if (dist < cutoff) {
+                result.append(allocator, .{
+                    .residue_i = ri,
+                    .residue_j = rj,
+                    .distance = dist,
+                }) catch {
+                    had_oom.* = true;
+                    return;
+                };
+            }
+        }
+    }
+}
+
+/// Multi-threaded version of `compute`.
+///
+/// Distributes outer residue indices across threads using round-robin (interleaved)
+/// assignment to balance the triangular workload. Falls back to single-threaded
+/// `compute` when `n_threads <= 1` or the residue count is too small.
+///
+/// Note: The provided `allocator` must be thread-safe (e.g. the default general-
+/// purpose allocator, `page_allocator`, or a thread-safe arena). Using a non-
+/// thread-safe allocator will cause data races.
+///
+/// The returned slice is owned by the caller; free with `allocator.free()`.
+pub fn computeParallel(
+    allocator: std.mem.Allocator,
+    topology: types.Topology,
+    frame: types.Frame,
+    scheme: Scheme,
+    cutoff: f32,
+    n_threads: usize,
+) ![]Contact {
+    const n_res = topology.residues.len;
+
+    // Fallback to single-threaded for small workloads.
+    if (n_threads <= 1 or n_res < 4) {
+        return compute(allocator, topology, frame, scheme, cutoff);
+    }
+
+    const cpu_count = std.Thread.getCpuCount() catch {
+        return compute(allocator, topology, frame, scheme, cutoff);
+    };
+    const actual_threads = @min(n_threads, cpu_count);
+    // Don't use more threads than residues.
+    const thread_count = @min(actual_threads, n_res);
+
+    // Per-thread OOM flags.
+    const oom_flags = try allocator.alloc(bool, thread_count);
+    defer allocator.free(oom_flags);
+    for (0..thread_count) |t| {
+        oom_flags[t] = false;
+    }
+
+    // Allocate thread-local ArrayLists (zero-initialized = safe for defer).
+    const tl_lists = try allocator.alloc(std.ArrayList(Contact), thread_count);
+    defer allocator.free(tl_lists);
+    for (0..thread_count) |t| {
+        tl_lists[t] = std.ArrayList(Contact){};
+    }
+    defer for (0..thread_count) |t| {
+        tl_lists[t].deinit(allocator);
+    };
+
+    // Spawn threads.
+    const threads = try allocator.alloc(std.Thread, thread_count);
+    defer allocator.free(threads);
+
+    var spawned: usize = 0;
+    errdefer for (threads[0..spawned]) |thread| {
+        thread.join();
+    };
+
+    for (0..thread_count) |t| {
+        threads[t] = try std.Thread.spawn(.{}, contactWorker, .{
+            topology,
+            frame,
+            scheme,
+            cutoff,
+            t,
+            thread_count,
+            &tl_lists[t],
+            allocator,
+            &oom_flags[t],
+        });
+        spawned += 1;
+    }
+
+    // Join all threads.
+    for (threads[0..spawned]) |thread| {
+        thread.join();
+    }
+    spawned = 0;
+
+    // Check for OOM in any worker.
+    for (0..thread_count) |t| {
+        if (oom_flags[t]) return error.OutOfMemory;
+    }
+
+    // Count total contacts and concatenate.
+    var total: usize = 0;
+    for (0..thread_count) |t| {
+        total += tl_lists[t].items.len;
+    }
+
+    const result = try allocator.alloc(Contact, total);
+    errdefer allocator.free(result);
+
+    var offset: usize = 0;
+    for (0..thread_count) |t| {
+        const items = tl_lists[t].items;
+        if (items.len > 0) {
+            @memcpy(result[offset..][0..items.len], items);
+            offset += items.len;
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -421,4 +574,112 @@ test "contacts: empty topology returns no contacts" {
     defer allocator.free(contacts);
 
     try std.testing.expectEqual(@as(usize, 0), contacts.len);
+}
+
+test "contacts: computeParallel matches single-threaded compute" {
+    const allocator = std.testing.allocator;
+
+    var sys = try makeTwoResidueSystem(allocator, .{ 0.0, 0.0, 0.0 }, .{ 4.0, 0.0, 0.0 });
+    defer sys.topo.deinit();
+    defer sys.frame.deinit();
+
+    // Single-threaded reference.
+    const st = try compute(allocator, sys.topo, sys.frame, .closest, 5.0);
+    defer allocator.free(st);
+
+    // Multi-threaded (falls back for n_res < 4, but still exercises the code path).
+    const mt = try computeParallel(allocator, sys.topo, sys.frame, .closest, 5.0, 4);
+    defer allocator.free(mt);
+
+    try std.testing.expectEqual(st.len, mt.len);
+    for (st, mt) |s, m| {
+        try std.testing.expectEqual(s.residue_i, m.residue_i);
+        try std.testing.expectEqual(s.residue_j, m.residue_j);
+        try std.testing.expectApproxEqAbs(s.distance, m.distance, 1e-6);
+    }
+}
+
+test "contacts: computeParallel exercises multi-threaded path with 6 residues" {
+    const allocator = std.testing.allocator;
+
+    const n_atoms: u32 = 6;
+    const n_residues: u32 = 6;
+
+    // Build a 6-residue system with 1 CA atom per residue along the x-axis.
+    // Positions: (0,0,0), (2,0,0), (4,0,0), (6,0,0), (8,0,0), (10,0,0)
+    // With cutoff=3.0, only consecutive residues are in contact (distance=2.0).
+    // Expected: 5 contacts: (0,1), (1,2), (2,3), (3,4), (4,5).
+    var topo = try types.Topology.init(allocator, .{
+        .n_atoms = n_atoms,
+        .n_residues = n_residues,
+        .n_chains = 1,
+        .n_bonds = 0,
+    });
+    defer topo.deinit();
+
+    const FS4 = types.FixedString(4);
+    const FS5 = types.FixedString(5);
+
+    for (0..n_atoms) |i| {
+        topo.atoms[i] = .{
+            .name = FS4.fromSlice("CA"),
+            .element = .C,
+            .residue_index = @intCast(i),
+        };
+        topo.residues[i] = .{
+            .name = FS5.fromSlice("ALA"),
+            .chain_index = 0,
+            .atom_range = .{ .start = @intCast(i), .len = 1 },
+            .resid = @as(i32, @intCast(i + 1)),
+        };
+    }
+    topo.chains[0] = .{
+        .name = FS4.fromSlice("A"),
+        .residue_range = .{ .start = 0, .len = n_residues },
+    };
+
+    var frame = try types.Frame.init(allocator, n_atoms);
+    defer frame.deinit();
+
+    for (0..n_atoms) |i| {
+        frame.x[i] = @as(f32, @floatFromInt(i)) * 2.0;
+        frame.y[i] = 0.0;
+        frame.z[i] = 0.0;
+    }
+
+    // Single-threaded reference.
+    const st = try compute(allocator, topo, frame, .closest, 3.0);
+    defer allocator.free(st);
+
+    try std.testing.expectEqual(@as(usize, 5), st.len);
+
+    // Multi-threaded: n_res=6 >= 4, so the parallel path is used.
+    const mt = try computeParallel(allocator, topo, frame, .closest, 3.0, 4);
+    defer allocator.free(mt);
+
+    try std.testing.expectEqual(@as(usize, 5), mt.len);
+
+    // Sort both by (residue_i, residue_j) for stable comparison.
+    const sortFn = struct {
+        fn lessThan(_: void, a: Contact, b: Contact) bool {
+            if (a.residue_i != b.residue_i) return a.residue_i < b.residue_i;
+            return a.residue_j < b.residue_j;
+        }
+    }.lessThan;
+
+    std.mem.sort(Contact, st, {}, sortFn);
+    std.mem.sort(Contact, mt, {}, sortFn);
+
+    for (st, mt) |s, m| {
+        try std.testing.expectEqual(s.residue_i, m.residue_i);
+        try std.testing.expectEqual(s.residue_j, m.residue_j);
+        try std.testing.expectApproxEqAbs(s.distance, m.distance, 1e-4);
+    }
+
+    // Verify expected contacts are consecutive pairs.
+    for (st, 0..) |c, i| {
+        try std.testing.expectEqual(@as(u32, @intCast(i)), c.residue_i);
+        try std.testing.expectEqual(@as(u32, @intCast(i + 1)), c.residue_j);
+        try std.testing.expectApproxEqAbs(@as(f32, 2.0), c.distance, 1e-4);
+    }
 }

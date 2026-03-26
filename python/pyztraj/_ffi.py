@@ -60,7 +60,7 @@ _CDEF = """
     int ztraj_rmsf(const float* all_x, const float* all_y, const float* all_z,
                    size_t n_frames, size_t n_atoms,
                    const uint32_t* atom_indices, size_t n_indices,
-                   double* result);
+                   double* result, uint32_t n_threads);
 
     // I/O: Structure loaders (PDB, GRO, mmCIF)
     int ztraj_load_pdb(const char* path, void** handle_out);
@@ -118,7 +118,7 @@ _CDEF = """
                                const float* x, const float* y, const float* z,
                                size_t n_atoms, int scheme, float cutoff,
                                CContact* contacts_out, size_t capacity,
-                               size_t* n_found);
+                               size_t* n_found, uint32_t n_threads);
 
     // MSD
     int ztraj_msd(const float* all_x, const float* all_y, const float* all_z,
