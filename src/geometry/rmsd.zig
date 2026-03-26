@@ -2,6 +2,9 @@
 //! Reference: Theobald, D.L. (2005) Acta Crystallographica A61:478-480.
 
 const std = @import("std");
+const simd = @import("../simd.zig");
+
+const vec_len = simd.optimal_vector_width.f64_width;
 
 /// Compute the minimum RMSD between two structures using the QCP algorithm.
 ///
@@ -43,13 +46,46 @@ pub fn compute(
             tgt_cz += @as(f64, z[idx]);
         }
     } else {
-        for (0..ref_x.len) |idx| {
-            ref_cx += @as(f64, ref_x[idx]);
-            ref_cy += @as(f64, ref_y[idx]);
-            ref_cz += @as(f64, ref_z[idx]);
-            tgt_cx += @as(f64, x[idx]);
-            tgt_cy += @as(f64, y[idx]);
-            tgt_cz += @as(f64, z[idx]);
+        const V = vec_len;
+        var v_ref_cx: @Vector(V, f64) = @splat(0.0);
+        var v_ref_cy: @Vector(V, f64) = @splat(0.0);
+        var v_ref_cz: @Vector(V, f64) = @splat(0.0);
+        var v_tgt_cx: @Vector(V, f64) = @splat(0.0);
+        var v_tgt_cy: @Vector(V, f64) = @splat(0.0);
+        var v_tgt_cz: @Vector(V, f64) = @splat(0.0);
+
+        var i: usize = 0;
+        while (i + V <= ref_x.len) : (i += V) {
+            const vrx: @Vector(V, f32) = ref_x[i..][0..V].*;
+            const vry: @Vector(V, f32) = ref_y[i..][0..V].*;
+            const vrz: @Vector(V, f32) = ref_z[i..][0..V].*;
+            const vtx: @Vector(V, f32) = x[i..][0..V].*;
+            const vty: @Vector(V, f32) = y[i..][0..V].*;
+            const vtz: @Vector(V, f32) = z[i..][0..V].*;
+
+            v_ref_cx += @as(@Vector(V, f64), @floatCast(vrx));
+            v_ref_cy += @as(@Vector(V, f64), @floatCast(vry));
+            v_ref_cz += @as(@Vector(V, f64), @floatCast(vrz));
+            v_tgt_cx += @as(@Vector(V, f64), @floatCast(vtx));
+            v_tgt_cy += @as(@Vector(V, f64), @floatCast(vty));
+            v_tgt_cz += @as(@Vector(V, f64), @floatCast(vtz));
+        }
+
+        ref_cx = @reduce(.Add, v_ref_cx);
+        ref_cy = @reduce(.Add, v_ref_cy);
+        ref_cz = @reduce(.Add, v_ref_cz);
+        tgt_cx = @reduce(.Add, v_tgt_cx);
+        tgt_cy = @reduce(.Add, v_tgt_cy);
+        tgt_cz = @reduce(.Add, v_tgt_cz);
+
+        // Scalar tail
+        while (i < ref_x.len) : (i += 1) {
+            ref_cx += @as(f64, ref_x[i]);
+            ref_cy += @as(f64, ref_y[i]);
+            ref_cz += @as(f64, ref_z[i]);
+            tgt_cx += @as(f64, x[i]);
+            tgt_cy += @as(f64, y[i]);
+            tgt_cz += @as(f64, z[i]);
         }
     }
     ref_cx /= n;
@@ -96,13 +132,75 @@ pub fn compute(
             szz += rz * tz;
         }
     } else {
-        for (0..ref_x.len) |idx| {
-            const rx = @as(f64, ref_x[idx]) - ref_cx;
-            const ry = @as(f64, ref_y[idx]) - ref_cy;
-            const rz = @as(f64, ref_z[idx]) - ref_cz;
-            const tx = @as(f64, x[idx]) - tgt_cx;
-            const ty = @as(f64, y[idx]) - tgt_cy;
-            const tz = @as(f64, z[idx]) - tgt_cz;
+        const V = vec_len;
+        // Broadcast center values
+        const splat_ref_cx: @Vector(V, f64) = @splat(ref_cx);
+        const splat_ref_cy: @Vector(V, f64) = @splat(ref_cy);
+        const splat_ref_cz: @Vector(V, f64) = @splat(ref_cz);
+        const splat_tgt_cx: @Vector(V, f64) = @splat(tgt_cx);
+        const splat_tgt_cy: @Vector(V, f64) = @splat(tgt_cy);
+        const splat_tgt_cz: @Vector(V, f64) = @splat(tgt_cz);
+
+        // 11 SIMD accumulators: 9 S-matrix + 2 G values
+        var v_sxx: @Vector(V, f64) = @splat(0.0);
+        var v_sxy: @Vector(V, f64) = @splat(0.0);
+        var v_sxz: @Vector(V, f64) = @splat(0.0);
+        var v_syx: @Vector(V, f64) = @splat(0.0);
+        var v_syy: @Vector(V, f64) = @splat(0.0);
+        var v_syz: @Vector(V, f64) = @splat(0.0);
+        var v_szx: @Vector(V, f64) = @splat(0.0);
+        var v_szy: @Vector(V, f64) = @splat(0.0);
+        var v_szz: @Vector(V, f64) = @splat(0.0);
+        var v_g_ref: @Vector(V, f64) = @splat(0.0);
+        var v_g_tgt: @Vector(V, f64) = @splat(0.0);
+
+        var i: usize = 0;
+        while (i + V <= ref_x.len) : (i += V) {
+            // Load f32 coords and widen to f64
+            const vrx: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_x[i..][0..V].*))) - splat_ref_cx;
+            const vry: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_y[i..][0..V].*))) - splat_ref_cy;
+            const vrz: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), ref_z[i..][0..V].*))) - splat_ref_cz;
+            const vtx: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), x[i..][0..V].*))) - splat_tgt_cx;
+            const vty: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), y[i..][0..V].*))) - splat_tgt_cy;
+            const vtz: @Vector(V, f64) = @as(@Vector(V, f64), @floatCast(@as(@Vector(V, f32), z[i..][0..V].*))) - splat_tgt_cz;
+
+            // G values
+            v_g_ref += vrx * vrx + vry * vry + vrz * vrz;
+            v_g_tgt += vtx * vtx + vty * vty + vtz * vtz;
+
+            // S-matrix cross products
+            v_sxx += vrx * vtx;
+            v_sxy += vrx * vty;
+            v_sxz += vrx * vtz;
+            v_syx += vry * vtx;
+            v_syy += vry * vty;
+            v_syz += vry * vtz;
+            v_szx += vrz * vtx;
+            v_szy += vrz * vty;
+            v_szz += vrz * vtz;
+        }
+
+        // Reduce all 11 accumulators
+        sxx = @reduce(.Add, v_sxx);
+        sxy = @reduce(.Add, v_sxy);
+        sxz = @reduce(.Add, v_sxz);
+        syx = @reduce(.Add, v_syx);
+        syy = @reduce(.Add, v_syy);
+        syz = @reduce(.Add, v_syz);
+        szx = @reduce(.Add, v_szx);
+        szy = @reduce(.Add, v_szy);
+        szz = @reduce(.Add, v_szz);
+        g_ref = @reduce(.Add, v_g_ref);
+        g_tgt = @reduce(.Add, v_g_tgt);
+
+        // Scalar tail
+        while (i < ref_x.len) : (i += 1) {
+            const rx = @as(f64, ref_x[i]) - ref_cx;
+            const ry = @as(f64, ref_y[i]) - ref_cy;
+            const rz = @as(f64, ref_z[i]) - ref_cz;
+            const tx = @as(f64, x[i]) - tgt_cx;
+            const ty = @as(f64, y[i]) - tgt_cy;
+            const tz = @as(f64, z[i]) - tgt_cz;
 
             g_ref += rx * rx + ry * ry + rz * rz;
             g_tgt += tx * tx + ty * ty + tz * tz;
@@ -267,4 +365,32 @@ test "rmsd: zero atoms" {
     const z = [_]f32{};
     const rmsd = compute(&x, &y, &z, &x, &y, &z, null);
     try std.testing.expectEqual(@as(f64, 0.0), rmsd);
+}
+
+test "rmsd: large array exercises SIMD path" {
+    // N=100 atoms, not divisible by all common SIMD widths,
+    // ensuring both SIMD main loop and scalar tail are exercised.
+    const N = 100;
+    var ref_x: [N]f32 = undefined;
+    var ref_y: [N]f32 = undefined;
+    var ref_z: [N]f32 = undefined;
+    var tgt_x: [N]f32 = undefined;
+    var tgt_y: [N]f32 = undefined;
+    var tgt_z: [N]f32 = undefined;
+
+    for (0..N) |i| {
+        const fi: f32 = @floatFromInt(i);
+        // Reference structure: atoms along a helix-like pattern
+        ref_x[i] = fi * 1.5;
+        ref_y[i] = @sin(fi * 0.1) * 5.0;
+        ref_z[i] = @cos(fi * 0.1) * 5.0;
+        // Target structure: same but translated by (10, -5, 3)
+        tgt_x[i] = ref_x[i] + 10.0;
+        tgt_y[i] = ref_y[i] - 5.0;
+        tgt_z[i] = ref_z[i] + 3.0;
+    }
+
+    // Pure translation => after centering, structures are identical => RMSD = 0
+    const rmsd = compute(&ref_x, &ref_y, &ref_z, &tgt_x, &tgt_y, &tgt_z, null);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), rmsd, 1e-6);
 }
