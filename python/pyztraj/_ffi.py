@@ -155,7 +155,8 @@ _CDEF = """
     int ztraj_compute_sasa(void* structure_handle,
                            const float* x, const float* y, const float* z,
                            size_t n_atoms, uint32_t n_points, double probe_radius,
-                           size_t n_threads, double* atom_areas, double* total_area);
+                           size_t n_threads, uint32_t algorithm,
+                           double* atom_areas, double* total_area);
 
     // Protein dihedrals
     int ztraj_compute_phi(void* handle, const float* x, const float* y, const float* z,
