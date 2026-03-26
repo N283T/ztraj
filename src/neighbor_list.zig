@@ -181,6 +181,15 @@ pub fn CellListGen(comptime T: type) type {
 
 const IterMode = enum { count, fill };
 
+/// Batch-compute squared distances from a single reference point to 4 target points.
+/// Returns a 4-element SIMD vector of squared distances, enabling vectorized arithmetic.
+fn batchDistanceSq4(comptime T: type, pi: Vec3Gen(T), p: [4]Vec3Gen(T)) @Vector(4, T) {
+    const dx: @Vector(4, T) = .{ p[0].x - pi.x, p[1].x - pi.x, p[2].x - pi.x, p[3].x - pi.x };
+    const dy: @Vector(4, T) = .{ p[0].y - pi.y, p[1].y - pi.y, p[2].y - pi.y, p[3].y - pi.y };
+    const dz: @Vector(4, T) = .{ p[0].z - pi.z, p[1].z - pi.z, p[2].z - pi.z, p[3].z - pi.z };
+    return dx * dx + dy * dy + dz * dz;
+}
+
 /// Shared iteration over all neighbor pairs using cell list.
 /// In count mode: increments counts[i] and counts[j] for each pair.
 /// In fill mode: writes indices into neighbor_indices using offsets + counts as cursors.
@@ -224,18 +233,63 @@ fn processNeighborPairs(
                         const cell2_atoms = cell_list.getCellAtoms(nidx);
 
                         for (cell1_atoms) |ai| {
-                            for (cell2_atoms) |aj| {
+                            const pi = positions[ai];
+                            const ri = radii[ai];
+                            const double_probe = 2.0 * probe_radius;
+
+                            // SIMD-batched inner loop: process 4 aj atoms at a time
+                            var j_idx: usize = 0;
+                            while (j_idx + 4 <= cell2_atoms.len) : (j_idx += 4) {
+                                const batch_aj = cell2_atoms[j_idx..][0..4];
+                                const batch_pos: [4]Vec3Gen(T) = .{
+                                    positions[batch_aj[0]],
+                                    positions[batch_aj[1]],
+                                    positions[batch_aj[2]],
+                                    positions[batch_aj[3]],
+                                };
+                                const dist_sq_vec = batchDistanceSq4(T, pi, batch_pos);
+                                const batch_radii: @Vector(4, T) = .{
+                                    radii[batch_aj[0]],
+                                    radii[batch_aj[1]],
+                                    radii[batch_aj[2]],
+                                    radii[batch_aj[3]],
+                                };
+                                const cutoff_vec: @Vector(4, T) = @as(@Vector(4, T), @splat(ri + double_probe)) + batch_radii;
+                                const cutoff_sq_vec = cutoff_vec * cutoff_vec;
+                                const mask = dist_sq_vec < cutoff_sq_vec;
+
+                                inline for (0..4) |bi| {
+                                    const aj = batch_aj[bi];
+                                    const dominated = same_cell and aj <= ai;
+                                    if (ai != aj and !dominated and mask[bi]) {
+                                        if (mode == .count) {
+                                            counts[ai] += 1;
+                                            counts[aj] += 1;
+                                        } else {
+                                            std.debug.assert(offsets[ai] + counts[ai] < offsets[ai + 1]);
+                                            neighbor_indices[offsets[ai] + counts[ai]] = aj;
+                                            counts[ai] += 1;
+                                            std.debug.assert(offsets[aj] + counts[aj] < offsets[aj + 1]);
+                                            neighbor_indices[offsets[aj] + counts[aj]] = ai;
+                                            counts[aj] += 1;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Scalar tail: remaining atoms that don't fill a batch of 4
+                            while (j_idx < cell2_atoms.len) : (j_idx += 1) {
+                                const aj = cell2_atoms[j_idx];
                                 if (ai == aj) continue;
                                 if (same_cell and aj <= ai) continue;
 
-                                const pi = positions[ai];
                                 const pj = positions[aj];
                                 const dx = pi.x - pj.x;
                                 const dy = pi.y - pj.y;
                                 const dz = pi.z - pj.z;
                                 const dist_sq = dx * dx + dy * dy + dz * dz;
 
-                                const cutoff = radii[ai] + radii[aj] + 2.0 * probe_radius;
+                                const cutoff = ri + radii[aj] + double_probe;
 
                                 if (dist_sq < cutoff * cutoff) {
                                     if (mode == .count) {
