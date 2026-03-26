@@ -23,9 +23,9 @@ const CellList = struct {
     /// cell_offsets[n_cells] is the total number of acceptors (sentinel).
     cell_offsets: []u32,
     /// Grid dimensions.
-    nx: u32,
-    ny: u32,
-    nz: u32,
+    nx: usize,
+    ny: usize,
+    nz: usize,
     /// Bounding box minimum (with padding).
     min_x: f32,
     min_y: f32,
@@ -38,11 +38,22 @@ const CellList = struct {
         allocator.free(self.cell_offsets);
     }
 
-    /// Return the cell index for a position, clamped to grid bounds.
-    inline fn cellIndex(self: CellList, px: f32, py: f32, pz: f32) u32 {
-        const cx = @min(@as(u32, @intFromFloat(@max(0.0, (px - self.min_x) * self.inv_cell_size))), self.nx - 1);
-        const cy = @min(@as(u32, @intFromFloat(@max(0.0, (py - self.min_y) * self.inv_cell_size))), self.ny - 1);
-        const cz = @min(@as(u32, @intFromFloat(@max(0.0, (pz - self.min_z) * self.inv_cell_size))), self.nz - 1);
+    /// Return the 3D grid coordinates for a position, clamped to grid bounds.
+    inline fn cellCoords(self: CellList, px: f32, py: f32, pz: f32) struct { usize, usize, usize } {
+        const cx = @min(@as(usize, @intFromFloat(@max(0.0, (px - self.min_x) * self.inv_cell_size))), self.nx - 1);
+        const cy = @min(@as(usize, @intFromFloat(@max(0.0, (py - self.min_y) * self.inv_cell_size))), self.ny - 1);
+        const cz = @min(@as(usize, @intFromFloat(@max(0.0, (pz - self.min_z) * self.inv_cell_size))), self.nz - 1);
+        return .{ cx, cy, cz };
+    }
+
+    /// Return the flat cell index for a position, clamped to grid bounds.
+    inline fn cellIndex(self: CellList, px: f32, py: f32, pz: f32) usize {
+        const coords = self.cellCoords(px, py, pz);
+        return coords[0] * self.ny * self.nz + coords[1] * self.nz + coords[2];
+    }
+
+    /// Return the flat cell index from 3D grid coordinates.
+    inline fn flatIndex(self: CellList, cx: usize, cy: usize, cz: usize) usize {
         return cx * self.ny * self.nz + cy * self.nz + cz;
     }
 };
@@ -65,6 +76,7 @@ fn buildAcceptorCellList(
 
     if (acc_count == 0) {
         const offsets = try allocator.alloc(u32, 2);
+        errdefer allocator.free(offsets);
         offsets[0] = 0;
         offsets[1] = 0;
         return CellList{
@@ -105,10 +117,10 @@ fn buildAcceptorCellList(
     bmax_z += cell_size;
 
     const inv_cs = 1.0 / cell_size;
-    const nx: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_x - bmin_x) * inv_cs))));
-    const ny: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_y - bmin_y) * inv_cs))));
-    const nz: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_z - bmin_z) * inv_cs))));
-    const n_cells: u32 = nx * ny * nz;
+    const nx: usize = @max(1, @as(usize, @intFromFloat(@ceil((bmax_x - bmin_x) * inv_cs))));
+    const ny: usize = @max(1, @as(usize, @intFromFloat(@ceil((bmax_y - bmin_y) * inv_cs))));
+    const nz: usize = @max(1, @as(usize, @intFromFloat(@ceil((bmax_z - bmin_z) * inv_cs))));
+    const n_cells: usize = nx * ny * nz;
 
     // Counting sort: first pass — count atoms per cell.
     const counts = try allocator.alloc(u32, n_cells + 1);
@@ -118,8 +130,21 @@ fn buildAcceptorCellList(
     // Temporary array to hold acceptor indices and their cell assignments.
     const acc_indices = try allocator.alloc(u32, acc_count);
     defer allocator.free(acc_indices);
-    const acc_cells = try allocator.alloc(u32, acc_count);
+    const acc_cells = try allocator.alloc(usize, acc_count);
     defer allocator.free(acc_cells);
+
+    // Temporary CellList for cellIndex computation during construction.
+    const grid = CellList{
+        .sorted_indices = &.{},
+        .cell_offsets = &.{},
+        .nx = nx,
+        .ny = ny,
+        .nz = nz,
+        .min_x = bmin_x,
+        .min_y = bmin_y,
+        .min_z = bmin_z,
+        .inv_cell_size = inv_cs,
+    };
 
     var ai: u32 = 0;
     for (0..n_atoms) |i| {
@@ -127,10 +152,7 @@ fn buildAcceptorCellList(
         if (elem == .N or elem == .O or elem == .S) {
             const idx: u32 = @intCast(i);
             acc_indices[ai] = idx;
-            const cx = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[i] - bmin_x) * inv_cs))), nx - 1);
-            const cy = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[i] - bmin_y) * inv_cs))), ny - 1);
-            const cz = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[i] - bmin_z) * inv_cs))), nz - 1);
-            const cell = cx * ny * nz + cy * nz + cz;
+            const cell = grid.cellIndex(frame.x[i], frame.y[i], frame.z[i]);
             acc_cells[ai] = cell;
             counts[cell] += 1;
             ai += 1;
@@ -139,6 +161,7 @@ fn buildAcceptorCellList(
 
     // Prefix sum to get offsets.
     const cell_offsets = try allocator.alloc(u32, n_cells + 1);
+    errdefer allocator.free(cell_offsets);
     cell_offsets[0] = 0;
     for (1..n_cells + 1) |c| {
         cell_offsets[c] = cell_offsets[c - 1] + counts[c - 1];
@@ -146,6 +169,7 @@ fn buildAcceptorCellList(
 
     // Second pass: place acceptors into sorted order.
     const sorted = try allocator.alloc(u32, acc_count);
+    errdefer allocator.free(sorted);
 
     // Reset counts for placement.
     @memset(counts[0..n_cells], 0);
@@ -272,26 +296,27 @@ fn detectWithCellList(
         if (mag1 < 1e-10) continue;
 
         // Determine the cell of the hydrogen atom and iterate 27 neighboring cells.
-        const h_cell_x = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[h_idx] - cell_list.min_x) * cell_list.inv_cell_size))), cell_list.nx - 1);
-        const h_cell_y = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[h_idx] - cell_list.min_y) * cell_list.inv_cell_size))), cell_list.ny - 1);
-        const h_cell_z = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[h_idx] - cell_list.min_z) * cell_list.inv_cell_size))), cell_list.nz - 1);
+        const h_coords = cell_list.cellCoords(frame.x[h_idx], frame.y[h_idx], frame.z[h_idx]);
+        const h_cell_x = h_coords[0];
+        const h_cell_y = h_coords[1];
+        const h_cell_z = h_coords[2];
 
-        const cx_lo: u32 = if (h_cell_x > 0) h_cell_x - 1 else 0;
-        const cx_hi: u32 = @min(h_cell_x + 1, cell_list.nx - 1);
-        const cy_lo: u32 = if (h_cell_y > 0) h_cell_y - 1 else 0;
-        const cy_hi: u32 = @min(h_cell_y + 1, cell_list.ny - 1);
-        const cz_lo: u32 = if (h_cell_z > 0) h_cell_z - 1 else 0;
-        const cz_hi: u32 = @min(h_cell_z + 1, cell_list.nz - 1);
+        const cx_lo: usize = if (h_cell_x > 0) h_cell_x - 1 else 0;
+        const cx_hi: usize = @min(h_cell_x + 1, cell_list.nx - 1);
+        const cy_lo: usize = if (h_cell_y > 0) h_cell_y - 1 else 0;
+        const cy_hi: usize = @min(h_cell_y + 1, cell_list.ny - 1);
+        const cz_lo: usize = if (h_cell_z > 0) h_cell_z - 1 else 0;
+        const cz_hi: usize = @min(h_cell_z + 1, cell_list.nz - 1);
 
-        var cx: u32 = cx_lo;
+        var cx: usize = cx_lo;
         while (cx <= cx_hi) : (cx += 1) {
-            var cy: u32 = cy_lo;
+            var cy: usize = cy_lo;
             while (cy <= cy_hi) : (cy += 1) {
-                var cz: u32 = cz_lo;
+                var cz: usize = cz_lo;
                 while (cz <= cz_hi) : (cz += 1) {
-                    const cell = cx * cell_list.ny * cell_list.nz + cy * cell_list.nz + cz;
-                    const start = cell_list.cell_offsets[cell];
-                    const end = cell_list.cell_offsets[cell + 1];
+                    const neighbor_cell = cell_list.flatIndex(cx, cy, cz);
+                    const start = cell_list.cell_offsets[neighbor_cell];
+                    const end = cell_list.cell_offsets[neighbor_cell + 1];
 
                     for (cell_list.sorted_indices[start..end]) |acc_idx| {
                         if (acc_idx == donor_idx or acc_idx == h_idx) continue;
@@ -369,24 +394,25 @@ fn hbondWorker(
         if (mag1 < 1e-10) continue;
 
         // Determine the cell of the hydrogen atom and iterate 27 neighboring cells.
-        const h_cell_x = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[h_idx] - cell_list.min_x) * cell_list.inv_cell_size))), cell_list.nx - 1);
-        const h_cell_y = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[h_idx] - cell_list.min_y) * cell_list.inv_cell_size))), cell_list.ny - 1);
-        const h_cell_z = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[h_idx] - cell_list.min_z) * cell_list.inv_cell_size))), cell_list.nz - 1);
+        const h_coords = cell_list.cellCoords(frame.x[h_idx], frame.y[h_idx], frame.z[h_idx]);
+        const h_cell_x = h_coords[0];
+        const h_cell_y = h_coords[1];
+        const h_cell_z = h_coords[2];
 
-        const cx_lo: u32 = if (h_cell_x > 0) h_cell_x - 1 else 0;
-        const cx_hi: u32 = @min(h_cell_x + 1, cell_list.nx - 1);
-        const cy_lo: u32 = if (h_cell_y > 0) h_cell_y - 1 else 0;
-        const cy_hi: u32 = @min(h_cell_y + 1, cell_list.ny - 1);
-        const cz_lo: u32 = if (h_cell_z > 0) h_cell_z - 1 else 0;
-        const cz_hi: u32 = @min(h_cell_z + 1, cell_list.nz - 1);
+        const cx_lo: usize = if (h_cell_x > 0) h_cell_x - 1 else 0;
+        const cx_hi: usize = @min(h_cell_x + 1, cell_list.nx - 1);
+        const cy_lo: usize = if (h_cell_y > 0) h_cell_y - 1 else 0;
+        const cy_hi: usize = @min(h_cell_y + 1, cell_list.ny - 1);
+        const cz_lo: usize = if (h_cell_z > 0) h_cell_z - 1 else 0;
+        const cz_hi: usize = @min(h_cell_z + 1, cell_list.nz - 1);
 
-        var cx: u32 = cx_lo;
+        var cx: usize = cx_lo;
         while (cx <= cx_hi) : (cx += 1) {
-            var cy: u32 = cy_lo;
+            var cy: usize = cy_lo;
             while (cy <= cy_hi) : (cy += 1) {
-                var cz: u32 = cz_lo;
+                var cz: usize = cz_lo;
                 while (cz <= cz_hi) : (cz += 1) {
-                    const cell = cx * cell_list.ny * cell_list.nz + cy * cell_list.nz + cz;
+                    const cell = cell_list.flatIndex(cx, cy, cz);
                     const start = cell_list.cell_offsets[cell];
                     const end = cell_list.cell_offsets[cell + 1];
 
@@ -419,9 +445,11 @@ fn hbondWorker(
                                 .acceptor = acc_idx,
                                 .distance = dist,
                                 .angle = angle_deg,
-                            }) catch {
-                                had_oom.* = true;
-                                return;
+                            }) catch |err| switch (err) {
+                                error.OutOfMemory => {
+                                    had_oom.* = true;
+                                    return;
+                                },
                             };
                         }
                     }
