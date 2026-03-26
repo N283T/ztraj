@@ -275,6 +275,7 @@ pub fn computeCovarianceMatrixParallel(
 
     // tl_covs[0] is the output buffer (caller-owned), rest are temporary.
     const cov = try allocator.alloc(f64, dim * dim);
+    errdefer allocator.free(cov);
     @memset(cov, 0.0);
     tl_covs[0] = cov;
 
