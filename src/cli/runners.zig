@@ -132,7 +132,8 @@ pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
         allocator.free(frames);
     }
 
-    const rmsf_vals = try geometry.rmsf.compute(allocator, frames, atom_indices);
+    const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
+    const rmsf_vals = try geometry.rmsf.computeParallel(allocator, frames, atom_indices, n_threads);
     defer allocator.free(rmsf_vals);
 
     var buf = std.ArrayList(u8){};
@@ -614,14 +615,16 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
 
     switch (args.format) {
         .json => {
+            const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
             try w.writeAll("[\n");
             for (frames, 0..) |frame, fi| {
-                const ctcts = try analysis.contacts.compute(
+                const ctcts = try analysis.contacts.computeParallel(
                     allocator,
                     parsed.topology,
                     frame,
                     scheme,
                     args.contacts_cutoff,
+                    n_threads,
                 );
                 defer allocator.free(ctcts);
                 if (fi > 0) try w.writeAll(",\n");
@@ -638,15 +641,17 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
             try w.writeAll("\n]\n");
         },
         .csv, .tsv => {
+            const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
             const delim: u8 = if (args.format == .csv) ',' else '\t';
             try w.print("frame{c}residue_i{c}residue_j{c}distance\n", .{ delim, delim, delim });
             for (frames, 0..) |frame, fi| {
-                const ctcts = try analysis.contacts.compute(
+                const ctcts = try analysis.contacts.computeParallel(
                     allocator,
                     parsed.topology,
                     frame,
                     scheme,
                     args.contacts_cutoff,
+                    n_threads,
                 );
                 defer allocator.free(ctcts);
                 for (ctcts) |ct| {
@@ -925,6 +930,7 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     const ref = frames[0];
 
     // Per-frame analysis
+    const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
     const hbonds_cfg = analysis.hbonds.Config{};
     const contacts_scheme: analysis.contacts.Scheme = .closest_heavy;
     const contacts_cutoff: f32 = 4.5;
@@ -969,13 +975,13 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
         n_hbonds[fi] = @floatFromInt(hbonds.len);
 
         // Contacts count
-        const contacts = try analysis.contacts.compute(allocator, parsed.topology, frame, contacts_scheme, contacts_cutoff);
+        const contacts = try analysis.contacts.computeParallel(allocator, parsed.topology, frame, contacts_scheme, contacts_cutoff, n_threads);
         defer allocator.free(contacts);
         n_contacts[fi] = @floatFromInt(contacts.len);
     }
 
     // RMSF (across all frames)
-    const rmsf_vals = try geometry.rmsf.compute(allocator, frames, atom_indices);
+    const rmsf_vals = try geometry.rmsf.computeParallel(allocator, frames, atom_indices, n_threads);
     defer allocator.free(rmsf_vals);
 
     // Write JSON output

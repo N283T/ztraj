@@ -434,6 +434,7 @@ export fn ztraj_rmsf(
     atom_indices: ?[*]const u32,
     n_indices: usize,
     result: [*]f64,
+    n_threads: u32,
 ) callconv(.c) c_int {
     if (n_frames == 0 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
 
@@ -455,10 +456,11 @@ export fn ztraj_rmsf(
         );
     }
 
-    const rmsf_result = rmsf_mod.compute(c_allocator, frames, indices) catch |err| {
+    const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
+    const rmsf_result = rmsf_mod.computeParallel(c_allocator, frames, indices, thread_count) catch |err| {
         return switch (err) {
             error.NoFrames => ZTRAJ_ERROR_INVALID_INPUT,
-            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            error.OutOfMemory, error.SystemResources, error.ThreadQuotaExceeded, error.LockedMemoryLimitExceeded, error.Unexpected => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
     };
     defer c_allocator.free(rmsf_result);
@@ -1176,6 +1178,7 @@ export fn ztraj_compute_contacts(
     contacts_out: [*]CContact,
     capacity: usize,
     n_found: *usize,
+    n_threads: u32,
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
@@ -1191,7 +1194,8 @@ export fn ztraj_compute_contacts(
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
-    const contacts = contacts_mod.compute(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff) catch {
+    const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
+    const contacts = contacts_mod.computeParallel(c_allocator, h.parse_result.topology, frame, zig_scheme, cutoff, thread_count) catch {
         return ZTRAJ_ERROR_OUT_OF_MEMORY;
     };
     defer c_allocator.free(contacts);

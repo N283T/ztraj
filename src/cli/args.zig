@@ -71,6 +71,8 @@ pub const Args = struct {
     contacts_scheme: []const u8 = "closest_heavy",
     /// Contacts: distance cutoff (Angstroms).
     contacts_cutoff: f32 = 5.0,
+    /// Number of threads (0 = auto-detect CPU count).
+    n_threads: usize = 0,
 };
 
 // ============================================================================
@@ -109,6 +111,7 @@ pub fn printUsage(prog: []const u8) void {
         \\  --select <expr>        Atom selection: backbone|protein|water|name <name>|index <spec>
         \\  --format <fmt>         Output format: json (default), csv, tsv
         \\  --output <file>        Write output to file (default: stdout)
+        \\  --threads <n>          Number of threads (0 = auto-detect, default: 0)
         \\
         \\Per-command options:
         \\  rmsd      --ref <n>                   Reference frame index (default: 0)
@@ -257,6 +260,10 @@ pub fn parseArgs(raw: []const []const u8) ParseArgsError!Args {
             i += 1;
             if (i >= raw.len) return ParseArgsError.MissingValue;
             args.contacts_cutoff = std.fmt.parseFloat(f32, raw[i]) catch return ParseArgsError.InvalidNumber;
+        } else if (std.mem.eql(u8, arg, "--threads")) {
+            i += 1;
+            if (i >= raw.len) return ParseArgsError.MissingValue;
+            args.n_threads = std.fmt.parseInt(usize, raw[i], 10) catch return ParseArgsError.InvalidNumber;
         } else if (std.mem.startsWith(u8, arg, "--")) {
             return ParseArgsError.UnknownFlag;
         } else {
