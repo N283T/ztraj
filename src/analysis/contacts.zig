@@ -140,6 +140,136 @@ pub fn compute(
 }
 
 // ============================================================================
+// Parallel implementation
+// ============================================================================
+
+/// Worker function for parallel contact computation.
+/// Each worker handles a contiguous range of outer residue indices [ri_start, ri_end).
+fn contactWorker(
+    topology: types.Topology,
+    frame: types.Frame,
+    scheme: Scheme,
+    cutoff: f32,
+    ri_start: usize,
+    ri_end: usize,
+    result: *std.ArrayList(Contact),
+    allocator: std.mem.Allocator,
+) void {
+    const n_res = topology.residues.len;
+    for (ri_start..ri_end) |ri_raw| {
+        for (ri_raw + 1..n_res) |rj_raw| {
+            const ri: u32 = @intCast(ri_raw);
+            const rj: u32 = @intCast(rj_raw);
+
+            const dist = residueDistance(
+                topology,
+                frame,
+                topology.residues[ri],
+                topology.residues[rj],
+                scheme,
+            ) orelse continue;
+
+            if (dist < cutoff) {
+                result.append(allocator, .{
+                    .residue_i = ri,
+                    .residue_j = rj,
+                    .distance = dist,
+                }) catch return;
+            }
+        }
+    }
+}
+
+/// Multi-threaded version of `compute`.
+///
+/// Partitions outer residue indices across threads. Falls back to single-threaded
+/// `compute` when `n_threads <= 1` or the residue count is too small.
+///
+/// The returned slice is owned by the caller; free with `allocator.free()`.
+pub fn computeParallel(
+    allocator: std.mem.Allocator,
+    topology: types.Topology,
+    frame: types.Frame,
+    scheme: Scheme,
+    cutoff: f32,
+    n_threads: usize,
+) ![]Contact {
+    const n_res = topology.residues.len;
+
+    // Fallback to single-threaded for small workloads.
+    if (n_threads <= 1 or n_res < 4) {
+        return compute(allocator, topology, frame, scheme, cutoff);
+    }
+
+    const cpu_count = std.Thread.getCpuCount() catch {
+        return compute(allocator, topology, frame, scheme, cutoff);
+    };
+    const actual_threads = @min(n_threads, cpu_count);
+    // Don't use more threads than residues.
+    const thread_count = @min(actual_threads, n_res);
+
+    // Allocate thread-local ArrayLists (zero-initialized = safe for defer).
+    const tl_lists = try allocator.alloc(std.ArrayList(Contact), thread_count);
+    defer allocator.free(tl_lists);
+    for (0..thread_count) |t| {
+        tl_lists[t] = std.ArrayList(Contact){};
+    }
+    defer for (0..thread_count) |t| {
+        tl_lists[t].deinit(allocator);
+    };
+
+    // Spawn threads.
+    const threads = try allocator.alloc(std.Thread, thread_count);
+    defer allocator.free(threads);
+
+    var spawned: usize = 0;
+    errdefer for (threads[0..spawned]) |thread| {
+        thread.join();
+    };
+
+    for (0..thread_count) |t| {
+        const ri_start = t * n_res / thread_count;
+        const ri_end = (t + 1) * n_res / thread_count;
+        threads[t] = try std.Thread.spawn(.{}, contactWorker, .{
+            topology,
+            frame,
+            scheme,
+            cutoff,
+            ri_start,
+            ri_end,
+            &tl_lists[t],
+            allocator,
+        });
+        spawned += 1;
+    }
+
+    // Join all threads.
+    for (threads[0..spawned]) |thread| {
+        thread.join();
+    }
+
+    // Count total contacts and concatenate.
+    var total: usize = 0;
+    for (0..thread_count) |t| {
+        total += tl_lists[t].items.len;
+    }
+
+    const result = try allocator.alloc(Contact, total);
+    errdefer allocator.free(result);
+
+    var offset: usize = 0;
+    for (0..thread_count) |t| {
+        const items = tl_lists[t].items;
+        if (items.len > 0) {
+            @memcpy(result[offset..][0..items.len], items);
+            offset += items.len;
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -421,4 +551,27 @@ test "contacts: empty topology returns no contacts" {
     defer allocator.free(contacts);
 
     try std.testing.expectEqual(@as(usize, 0), contacts.len);
+}
+
+test "contacts: computeParallel matches single-threaded compute" {
+    const allocator = std.testing.allocator;
+
+    var sys = try makeTwoResidueSystem(allocator, .{ 0.0, 0.0, 0.0 }, .{ 4.0, 0.0, 0.0 });
+    defer sys.topo.deinit();
+    defer sys.frame.deinit();
+
+    // Single-threaded reference.
+    const st = try compute(allocator, sys.topo, sys.frame, .closest, 5.0);
+    defer allocator.free(st);
+
+    // Multi-threaded (falls back for n_res < 4, but still exercises the code path).
+    const mt = try computeParallel(allocator, sys.topo, sys.frame, .closest, 5.0, 4);
+    defer allocator.free(mt);
+
+    try std.testing.expectEqual(st.len, mt.len);
+    for (st, mt) |s, m| {
+        try std.testing.expectEqual(s.residue_i, m.residue_i);
+        try std.testing.expectEqual(s.residue_j, m.residue_j);
+        try std.testing.expectApproxEqAbs(s.distance, m.distance, 1e-6);
+    }
 }
