@@ -74,10 +74,12 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
 
 /// Load every frame from a trajectory or single-structure file.
 /// Returns allocated []Frame (caller frees each frame then the slice).
+/// An optional progress node is updated per frame loaded.
 pub fn loadAllFrames(
     allocator: std.mem.Allocator,
     traj_path: []const u8,
     n_atoms: usize,
+    progress_node: std.Progress.Node,
 ) ![]types.Frame {
     var frames = std.ArrayList(types.Frame){};
     errdefer {
@@ -97,6 +99,7 @@ pub fn loadAllFrames(
             copy.step = frame_ptr.step;
             copy.box_vectors = frame_ptr.box_vectors;
             try frames.append(allocator, copy);
+            progress_node.completeOne();
         }
     } else if (isDcd(traj_path)) {
         var reader = try io.dcd.DcdReader.open(allocator, traj_path);
@@ -110,6 +113,7 @@ pub fn loadAllFrames(
             copy.step = frame_ptr.step;
             copy.box_vectors = frame_ptr.box_vectors;
             try frames.append(allocator, copy);
+            progress_node.completeOne();
         }
     } else if (isTrr(traj_path)) {
         var reader = try io.trr.TrrReader.open(allocator, traj_path);
@@ -123,6 +127,7 @@ pub fn loadAllFrames(
             copy.step = frame_ptr.step;
             copy.box_vectors = frame_ptr.box_vectors;
             try frames.append(allocator, copy);
+            progress_node.completeOne();
         }
     } else {
         // Single-frame structure file — parse only for its coordinates.
@@ -143,7 +148,21 @@ pub fn loadAllFrames(
         };
         pr.topology.deinit();
         try frames.append(allocator, pr.frame);
+        progress_node.completeOne();
     }
 
     return frames.toOwnedSlice(allocator);
+}
+
+/// Convenience wrapper: creates a "Loading frames" progress node, loads all
+/// frames, and ends the node automatically via defer.
+pub fn loadAllFramesWithProgress(
+    allocator: std.mem.Allocator,
+    traj_path: []const u8,
+    n_atoms: usize,
+    progress_root: std.Progress.Node,
+) ![]types.Frame {
+    const load_node = progress_root.start("Loading frames", 0);
+    defer load_node.end();
+    return loadAllFrames(allocator, traj_path, n_atoms, load_node);
 }

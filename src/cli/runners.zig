@@ -66,6 +66,8 @@ pub fn writeScalarSeriesBuf(
 // ============================================================================
 
 pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "rmsd" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -73,7 +75,7 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -96,6 +98,7 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
 
     const rmsd_vals = try allocator.alloc(f64, frames.len);
     defer allocator.free(rmsd_vals);
+    const analysis_node = progress_root.start("Computing RMSD", frames.len);
     for (frames, 0..) |frame, fi| {
         rmsd_vals[fi] = geometry.rmsd.compute(
             ref.x,
@@ -106,7 +109,10 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
             frame.z,
             atom_indices,
         );
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
@@ -119,6 +125,8 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "rmsf" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -126,15 +134,18 @@ pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
     }
 
     const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
+    const analysis_node = progress_root.start("Computing RMSF", 0);
     const rmsf_vals = try geometry.rmsf.computeParallel(allocator, frames, atom_indices, n_threads);
+    analysis_node.end();
     defer allocator.free(rmsf_vals);
+    progress_root.end();
 
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
@@ -147,6 +158,8 @@ pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "distances" });
+
     const spec = args.pairs_spec orelse {
         std.debug.print("error: --pairs required for distances subcommand\n", .{});
         std.process.exit(1);
@@ -160,7 +173,7 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
 
     parsers.validateIndices(2, pairs, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -175,12 +188,16 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
     const row_storage = try allocator.alloc(f64, frames.len * n_pairs);
     defer allocator.free(row_storage);
 
+    const analysis_node = progress_root.start("Computing distances", frames.len);
     for (frames, 0..) |frame, fi| {
         geometry.distances.compute(frame.x, frame.y, frame.z, pairs, dist_buf);
         const row = row_storage[fi * n_pairs .. (fi + 1) * n_pairs];
         for (dist_buf, row) |d, *r| r.* = @floatCast(d);
         all_rows[fi] = row;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var headers = try allocator.alloc([]u8, n_pairs);
     defer {
@@ -221,6 +238,8 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "angles" });
+
     const spec = args.triplets_spec orelse {
         std.debug.print("error: --triplets required for angles subcommand\n", .{});
         std.process.exit(1);
@@ -234,7 +253,7 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
 
     parsers.validateIndices(3, triplets, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -249,12 +268,16 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
     const row_storage = try allocator.alloc(f64, frames.len * n_tri);
     defer allocator.free(row_storage);
 
+    const analysis_node = progress_root.start("Computing angles", frames.len);
     for (frames, 0..) |frame, fi| {
         geometry.angles.compute(frame.x, frame.y, frame.z, triplets, angle_buf);
         const row = row_storage[fi * n_tri .. (fi + 1) * n_tri];
         for (angle_buf, row) |a, *r| r.* = @floatCast(a);
         all_rows[fi] = row;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var headers = try allocator.alloc([]u8, n_tri);
     defer {
@@ -294,6 +317,8 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "dihedrals" });
+
     const spec = args.quartets_spec orelse {
         std.debug.print("error: --quartets required for dihedrals subcommand\n", .{});
         std.process.exit(1);
@@ -307,7 +332,7 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
 
     parsers.validateIndices(4, quartets, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -322,12 +347,16 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
     const row_storage = try allocator.alloc(f64, frames.len * n_q);
     defer allocator.free(row_storage);
 
+    const analysis_node = progress_root.start("Computing dihedrals", frames.len);
     for (frames, 0..) |frame, fi| {
         geometry.dihedrals.compute(frame.x, frame.y, frame.z, quartets, dih_buf);
         const row = row_storage[fi * n_q .. (fi + 1) * n_q];
         for (dih_buf, row) |d, *r| r.* = @floatCast(d);
         all_rows[fi] = row;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var headers = try allocator.alloc([]u8, n_q);
     defer {
@@ -367,6 +396,8 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "rg" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -377,7 +408,7 @@ pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -385,9 +416,13 @@ pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
 
     const rg_vals = try allocator.alloc(f64, frames.len);
     defer allocator.free(rg_vals);
+    const analysis_node = progress_root.start("Computing Rg", frames.len);
     for (frames, 0..) |frame, fi| {
         rg_vals[fi] = geometry.rg.compute(frame.x, frame.y, frame.z, masses, atom_indices);
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
@@ -400,6 +435,8 @@ pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "center" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -410,7 +447,7 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -421,6 +458,7 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
     const row_storage = try allocator.alloc(f64, frames.len * 3);
     defer allocator.free(row_storage);
 
+    const analysis_node = progress_root.start("Computing center", frames.len);
     for (frames, 0..) |frame, fi| {
         const com = geometry.center.ofMass(frame.x, frame.y, frame.z, masses, atom_indices);
         const row = row_storage[fi * 3 .. (fi + 1) * 3];
@@ -428,7 +466,10 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
         row[1] = com[1];
         row[2] = com[2];
         all_rows[fi] = row;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     const headers = [_][]const u8{ "cx", "cy", "cz" };
     var buf = std.ArrayList(u8){};
@@ -463,6 +504,8 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "inertia" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -473,7 +516,7 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -484,6 +527,7 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
     const row_storage = try allocator.alloc(f64, frames.len * 3);
     defer allocator.free(row_storage);
 
+    const analysis_node = progress_root.start("Computing inertia", frames.len);
     for (frames, 0..) |frame, fi| {
         const tensor = geometry.inertia.compute(frame.x, frame.y, frame.z, masses, atom_indices);
         const moments = geometry.inertia.principalMoments(tensor);
@@ -492,7 +536,10 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
         row[1] = moments[1];
         row[2] = moments[2];
         all_rows[fi] = row;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     const headers = [_][]const u8{ "I1", "I2", "I3" };
     var buf = std.ArrayList(u8){};
@@ -527,11 +574,13 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "hbonds" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -548,6 +597,7 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
     defer buf.deinit(allocator);
     const w = buf.writer(allocator);
 
+    const analysis_node = progress_root.start("Detecting H-bonds", frames.len);
     switch (args.format) {
         .json => {
             try w.writeAll("[\n");
@@ -564,6 +614,7 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
                     );
                 }
                 try w.writeAll("]}");
+                analysis_node.completeOne();
             }
             try w.writeAll("\n]\n");
         },
@@ -579,9 +630,12 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
                         delim, hb.distance, delim,    hb.angle,
                     });
                 }
+                analysis_node.completeOne();
             }
         },
     }
+    analysis_node.end();
+    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -590,11 +644,13 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "contacts" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -615,6 +671,7 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
     defer buf.deinit(allocator);
     const w = buf.writer(allocator);
 
+    const analysis_node = progress_root.start("Computing contacts", frames.len);
     switch (args.format) {
         .json => {
             const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
@@ -639,6 +696,7 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
                     );
                 }
                 try w.writeAll("]}");
+                analysis_node.completeOne();
             }
             try w.writeAll("\n]\n");
         },
@@ -661,9 +719,12 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
                         fi, delim, ct.residue_i, delim, ct.residue_j, delim, ct.distance,
                     });
                 }
+                analysis_node.completeOne();
             }
         },
     }
+    analysis_node.end();
+    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -672,6 +733,8 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "rdf" });
+
     if (args.sel1 == null or args.sel2 == null) {
         std.debug.print("error: --sel1 and --sel2 required for rdf subcommand\n", .{});
         std.process.exit(1);
@@ -686,7 +749,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
     const idx2 = try parsers.resolveSelection(allocator, parsed.topology, args.sel2);
     defer if (idx2) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -711,6 +774,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
 
     const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
 
+    const analysis_node = progress_root.start("Computing RDF", frames.len);
     for (frames) |frame| {
         const n1: usize = if (idx1) |ai| ai.len else frame.nAtoms();
         const n2: usize = if (idx2) |ai| ai.len else frame.nAtoms();
@@ -801,7 +865,10 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
             accumulated_r = try allocator.dupe(f64, result.r);
         }
         for (result.g_r, accumulated_gr) |g, *acc| acc.* += g;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     const n_frames_f: f64 = @floatFromInt(frames.len);
     for (accumulated_gr) |*g| g.* /= n_frames_f;
@@ -844,6 +911,8 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "sasa" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
@@ -851,7 +920,7 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -861,6 +930,7 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
     const sasa_vals = try allocator.alloc(f64, frames.len);
     defer allocator.free(sasa_vals);
 
+    const analysis_node = progress_root.start("Computing SASA", frames.len);
     for (frames, 0..) |frame, fi| {
         var result = try analysis.sasa.compute(
             allocator,
@@ -873,7 +943,10 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
         );
         defer result.deinit();
         sasa_vals[fi] = result.total_area;
+        analysis_node.completeOne();
     }
+    analysis_node.end();
+    progress_root.end();
 
     var buf = std.ArrayList(u8){};
     defer buf.deinit(allocator);
@@ -886,6 +959,8 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "all" });
+
     // The all command only supports JSON output (multi-metric data
     // doesn't map to flat CSV/TSV)
     if (args.format != .json) {
@@ -904,7 +979,7 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -940,6 +1015,7 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     const contacts_scheme: analysis.contacts.Scheme = .closest_heavy;
     const contacts_cutoff: f32 = 4.5;
 
+    const analysis_node = progress_root.start("Analyzing frames", n_frames);
     for (frames, 0..) |frame, fi| {
         // RMSD
         rmsd_vals[fi] = geometry.rmsd.compute(
@@ -983,11 +1059,16 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
         const contacts = try analysis.contacts.computeParallel(allocator, parsed.topology, frame, contacts_scheme, contacts_cutoff, n_threads);
         defer allocator.free(contacts);
         n_contacts[fi] = @floatFromInt(contacts.len);
+        analysis_node.completeOne();
     }
+    analysis_node.end();
 
     // RMSF (across all frames)
+    const rmsf_node = progress_root.start("Computing RMSF", 0);
     const rmsf_vals = try geometry.rmsf.computeParallel(allocator, frames, atom_indices, n_threads);
+    rmsf_node.end();
     defer allocator.free(rmsf_vals);
+    progress_root.end();
 
     // Write JSON output
     var buf = std.ArrayList(u8){};
@@ -1028,11 +1109,13 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
 // ============================================================================
 
 pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "dssp" });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -1085,6 +1168,7 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
         }
     } else {
         // Multi-frame: output per-frame SS string
+        const analysis_node = progress_root.start("Computing DSSP", frames.len);
         switch (args.format) {
             .json => {
                 try w.writeAll("{\n  \"dssp\": [\n");
@@ -1098,6 +1182,7 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
                         try w.writeByte(res.secondary_structure.toChar());
                     }
                     try w.writeByte('"');
+                    analysis_node.completeOne();
                 }
                 try w.writeAll("\n  ]\n}\n");
             },
@@ -1113,10 +1198,13 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
                         try w.writeByte(res.secondary_structure.toChar());
                     }
                     try w.writeByte('\n');
+                    analysis_node.completeOne();
                 }
             },
         }
+        analysis_node.end();
     }
+    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -1132,11 +1220,13 @@ fn runProteinDihedral(
     comptime key: []const u8,
     computeFn: anytype,
 ) !void {
+    const progress_root = std.Progress.start(.{ .root_name = key });
+
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -1148,6 +1238,7 @@ fn runProteinDihedral(
     const w = buf.writer(allocator);
 
     // Compute for each frame
+    const analysis_node = progress_root.start("Computing " ++ key, frames.len);
     switch (args.format) {
         .json => {
             try w.writeAll("{\n  \"" ++ key ++ "\": [\n");
@@ -1165,6 +1256,7 @@ fn runProteinDihedral(
                     }
                 }
                 try w.writeByte(']');
+                analysis_node.completeOne();
             }
             try w.writeAll("\n  ]\n}\n");
         },
@@ -1187,9 +1279,12 @@ fn runProteinDihedral(
                     }
                 }
                 try w.writeByte('\n');
+                analysis_node.completeOne();
             }
         },
     }
+    analysis_node.end();
+    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -1206,12 +1301,14 @@ pub fn runOmega(allocator: std.mem.Allocator, args: Args) !void {
 }
 
 pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(.{ .root_name = "chi" });
+
     // chi level could be a CLI arg, default to 1 for now
     const top_path = args.top_path orelse args.traj_path;
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFrames(allocator, args.traj_path, parsed.topology.atoms.len);
+    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -1223,6 +1320,7 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
     const w = buf.writer(allocator);
 
     // Output chi1-chi4 for each frame
+    const analysis_node = progress_root.start("Computing chi", frames.len);
     switch (args.format) {
         .json => {
             try w.writeAll("{\n");
@@ -1245,6 +1343,7 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
                         }
                     }
                     try w.writeByte(']');
+                    if (ci == 0) analysis_node.completeOne();
                 }
                 try w.writeAll("\n  ]");
             }
@@ -1269,9 +1368,12 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
                     }
                 }
                 try w.writeByte('\n');
+                analysis_node.completeOne();
             }
         },
     }
+    analysis_node.end();
+    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -1378,7 +1480,7 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
     // -- Trajectory info (if separate trajectory file) ----------------------
     const has_traj = args.top_path != null;
     if (has_traj) {
-        const frames = try loader.loadAllFrames(allocator, args.traj_path, topo.atoms.len);
+        const frames = try loader.loadAllFrames(allocator, args.traj_path, topo.atoms.len, std.Progress.Node.none);
         defer {
             for (frames) |*f| @constCast(f).deinit();
             allocator.free(frames);
@@ -1420,7 +1522,7 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
         const n_atoms = parsed.topology.atoms.len;
 
         // Load all frames from input
-        const frames = try loader.loadAllFrames(allocator, args.traj_path, n_atoms);
+        const frames = try loader.loadAllFrames(allocator, args.traj_path, n_atoms, std.Progress.Node.none);
         defer {
             for (frames) |*f| @constCast(f).deinit();
             allocator.free(frames);
