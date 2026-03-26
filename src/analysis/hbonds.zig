@@ -12,6 +12,163 @@ const std = @import("std");
 const types = @import("../types.zig");
 
 // ============================================================================
+// Spatial cell list for acceptor lookup
+// ============================================================================
+
+/// Cell list data for spatial acceleration of acceptor lookup.
+const CellList = struct {
+    /// Sorted acceptor atom indices (indices into the original atom array).
+    sorted_indices: []u32,
+    /// cell_offsets[i] is the start index in sorted_indices for cell i.
+    /// cell_offsets[n_cells] is the total number of acceptors (sentinel).
+    cell_offsets: []u32,
+    /// Grid dimensions.
+    nx: u32,
+    ny: u32,
+    nz: u32,
+    /// Bounding box minimum (with padding).
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    /// Inverse cell size for coordinate-to-cell conversion.
+    inv_cell_size: f32,
+
+    fn deinit(self: CellList, allocator: std.mem.Allocator) void {
+        allocator.free(self.sorted_indices);
+        allocator.free(self.cell_offsets);
+    }
+
+    /// Return the cell index for a position, clamped to grid bounds.
+    inline fn cellIndex(self: CellList, px: f32, py: f32, pz: f32) u32 {
+        const cx = @min(@as(u32, @intFromFloat(@max(0.0, (px - self.min_x) * self.inv_cell_size))), self.nx - 1);
+        const cy = @min(@as(u32, @intFromFloat(@max(0.0, (py - self.min_y) * self.inv_cell_size))), self.ny - 1);
+        const cz = @min(@as(u32, @intFromFloat(@max(0.0, (pz - self.min_z) * self.inv_cell_size))), self.nz - 1);
+        return cx * self.ny * self.nz + cy * self.nz + cz;
+    }
+};
+
+/// Build a cell list of acceptor atoms (N, O, S) for spatial lookup.
+fn buildAcceptorCellList(
+    allocator: std.mem.Allocator,
+    frame: types.Frame,
+    topology: types.Topology,
+    cell_size: f32,
+) !CellList {
+    const n_atoms = topology.atoms.len;
+
+    // Pre-filter: collect acceptor indices.
+    var acc_count: u32 = 0;
+    for (0..n_atoms) |i| {
+        const elem = topology.atoms[i].element;
+        if (elem == .N or elem == .O or elem == .S) acc_count += 1;
+    }
+
+    if (acc_count == 0) {
+        const offsets = try allocator.alloc(u32, 2);
+        offsets[0] = 0;
+        offsets[1] = 0;
+        return CellList{
+            .sorted_indices = try allocator.alloc(u32, 0),
+            .cell_offsets = offsets,
+            .nx = 1,
+            .ny = 1,
+            .nz = 1,
+            .min_x = 0,
+            .min_y = 0,
+            .min_z = 0,
+            .inv_cell_size = 1.0 / cell_size,
+        };
+    }
+
+    // Compute bounding box from ALL atom positions.
+    var bmin_x: f32 = frame.x[0];
+    var bmin_y: f32 = frame.y[0];
+    var bmin_z: f32 = frame.z[0];
+    var bmax_x: f32 = frame.x[0];
+    var bmax_y: f32 = frame.y[0];
+    var bmax_z: f32 = frame.z[0];
+    for (1..n_atoms) |i| {
+        bmin_x = @min(bmin_x, frame.x[i]);
+        bmin_y = @min(bmin_y, frame.y[i]);
+        bmin_z = @min(bmin_z, frame.z[i]);
+        bmax_x = @max(bmax_x, frame.x[i]);
+        bmax_y = @max(bmax_y, frame.y[i]);
+        bmax_z = @max(bmax_z, frame.z[i]);
+    }
+
+    // Add padding of cell_size.
+    bmin_x -= cell_size;
+    bmin_y -= cell_size;
+    bmin_z -= cell_size;
+    bmax_x += cell_size;
+    bmax_y += cell_size;
+    bmax_z += cell_size;
+
+    const inv_cs = 1.0 / cell_size;
+    const nx: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_x - bmin_x) * inv_cs))));
+    const ny: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_y - bmin_y) * inv_cs))));
+    const nz: u32 = @max(1, @as(u32, @intFromFloat(@ceil((bmax_z - bmin_z) * inv_cs))));
+    const n_cells: u32 = nx * ny * nz;
+
+    // Counting sort: first pass — count atoms per cell.
+    const counts = try allocator.alloc(u32, n_cells + 1);
+    defer allocator.free(counts);
+    @memset(counts, 0);
+
+    // Temporary array to hold acceptor indices and their cell assignments.
+    const acc_indices = try allocator.alloc(u32, acc_count);
+    defer allocator.free(acc_indices);
+    const acc_cells = try allocator.alloc(u32, acc_count);
+    defer allocator.free(acc_cells);
+
+    var ai: u32 = 0;
+    for (0..n_atoms) |i| {
+        const elem = topology.atoms[i].element;
+        if (elem == .N or elem == .O or elem == .S) {
+            const idx: u32 = @intCast(i);
+            acc_indices[ai] = idx;
+            const cx = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[i] - bmin_x) * inv_cs))), nx - 1);
+            const cy = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[i] - bmin_y) * inv_cs))), ny - 1);
+            const cz = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[i] - bmin_z) * inv_cs))), nz - 1);
+            const cell = cx * ny * nz + cy * nz + cz;
+            acc_cells[ai] = cell;
+            counts[cell] += 1;
+            ai += 1;
+        }
+    }
+
+    // Prefix sum to get offsets.
+    const cell_offsets = try allocator.alloc(u32, n_cells + 1);
+    cell_offsets[0] = 0;
+    for (1..n_cells + 1) |c| {
+        cell_offsets[c] = cell_offsets[c - 1] + counts[c - 1];
+    }
+
+    // Second pass: place acceptors into sorted order.
+    const sorted = try allocator.alloc(u32, acc_count);
+
+    // Reset counts for placement.
+    @memset(counts[0..n_cells], 0);
+    for (0..acc_count) |j| {
+        const cell = acc_cells[j];
+        sorted[cell_offsets[cell] + counts[cell]] = acc_indices[j];
+        counts[cell] += 1;
+    }
+
+    return CellList{
+        .sorted_indices = sorted,
+        .cell_offsets = cell_offsets,
+        .nx = nx,
+        .ny = ny,
+        .nz = nz,
+        .min_x = bmin_x,
+        .min_y = bmin_y,
+        .min_z = bmin_z,
+        .inv_cell_size = inv_cs,
+    };
+}
+
+// ============================================================================
 // Public types
 // ============================================================================
 
@@ -58,7 +215,27 @@ pub fn detect(
     errdefer result.deinit(allocator);
 
     const n_atoms = topology.atoms.len;
+    if (n_atoms == 0) return result.toOwnedSlice(allocator);
 
+    // Build spatial cell list of acceptor atoms for O(1) neighbor lookup.
+    var cell_list = try buildAcceptorCellList(allocator, frame, topology, config.dist_cutoff);
+    defer cell_list.deinit(allocator);
+
+    try detectWithCellList(allocator, topology, frame, config, &cell_list, &result);
+
+    return result.toOwnedSlice(allocator);
+}
+
+/// Core detection logic using a pre-built cell list.
+/// Iterates topology bonds, finds D-H pairs, and checks nearby acceptors via the cell list.
+fn detectWithCellList(
+    allocator: std.mem.Allocator,
+    topology: types.Topology,
+    frame: types.Frame,
+    config: Config,
+    cell_list: *const CellList,
+    result: *std.ArrayList(HBond),
+) !void {
     for (topology.bonds) |bond| {
         const a1 = topology.atoms[bond.atom_i];
         const a2 = topology.atoms[bond.atom_j];
@@ -94,45 +271,64 @@ pub fn detect(
         const mag1 = @sqrt(v1x * v1x + v1y * v1y + v1z * v1z);
         if (mag1 < 1e-10) continue;
 
-        for (0..n_atoms) |acc_raw| {
-            const acc_idx: u32 = @intCast(acc_raw);
-            if (acc_idx == donor_idx or acc_idx == h_idx) continue;
+        // Determine the cell of the hydrogen atom and iterate 27 neighboring cells.
+        const h_cell_x = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[h_idx] - cell_list.min_x) * cell_list.inv_cell_size))), cell_list.nx - 1);
+        const h_cell_y = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[h_idx] - cell_list.min_y) * cell_list.inv_cell_size))), cell_list.ny - 1);
+        const h_cell_z = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[h_idx] - cell_list.min_z) * cell_list.inv_cell_size))), cell_list.nz - 1);
 
-            const acc_elem = topology.atoms[acc_idx].element;
-            if (acc_elem != .N and acc_elem != .O and acc_elem != .S) continue;
+        const cx_lo: u32 = if (h_cell_x > 0) h_cell_x - 1 else 0;
+        const cx_hi: u32 = @min(h_cell_x + 1, cell_list.nx - 1);
+        const cy_lo: u32 = if (h_cell_y > 0) h_cell_y - 1 else 0;
+        const cy_hi: u32 = @min(h_cell_y + 1, cell_list.ny - 1);
+        const cz_lo: u32 = if (h_cell_z > 0) h_cell_z - 1 else 0;
+        const cz_hi: u32 = @min(h_cell_z + 1, cell_list.nz - 1);
 
-            // H...A vector.
-            const v2x: f64 = @as(f64, frame.x[acc_idx]) - hx;
-            const v2y: f64 = @as(f64, frame.y[acc_idx]) - hy;
-            const v2z: f64 = @as(f64, frame.z[acc_idx]) - hz;
+        var cx: u32 = cx_lo;
+        while (cx <= cx_hi) : (cx += 1) {
+            var cy: u32 = cy_lo;
+            while (cy <= cy_hi) : (cy += 1) {
+                var cz: u32 = cz_lo;
+                while (cz <= cz_hi) : (cz += 1) {
+                    const cell = cx * cell_list.ny * cell_list.nz + cy * cell_list.nz + cz;
+                    const start = cell_list.cell_offsets[cell];
+                    const end = cell_list.cell_offsets[cell + 1];
 
-            // H...A distance.
-            const dist_sq = v2x * v2x + v2y * v2y + v2z * v2z;
-            const dist: f32 = @floatCast(@sqrt(dist_sq));
-            if (dist > config.dist_cutoff) continue;
+                    for (cell_list.sorted_indices[start..end]) |acc_idx| {
+                        if (acc_idx == donor_idx or acc_idx == h_idx) continue;
 
-            const mag2 = @sqrt(dist_sq);
-            if (mag2 < 1e-10) continue;
+                        // H...A vector.
+                        const v2x: f64 = @as(f64, frame.x[acc_idx]) - hx;
+                        const v2y: f64 = @as(f64, frame.y[acc_idx]) - hy;
+                        const v2z: f64 = @as(f64, frame.z[acc_idx]) - hz;
 
-            // D-H...A angle via dot product.
-            const dot_val = v1x * v2x + v1y * v2y + v1z * v2z;
-            const cos_angle = std.math.clamp(dot_val / (mag1 * mag2), -1.0, 1.0);
-            const angle_rad = std.math.acos(cos_angle);
-            const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
+                        // H...A distance.
+                        const dist_sq = v2x * v2x + v2y * v2y + v2z * v2z;
+                        const dist: f32 = @floatCast(@sqrt(dist_sq));
+                        if (dist > config.dist_cutoff) continue;
 
-            if (angle_deg >= config.angle_cutoff) {
-                try result.append(allocator, .{
-                    .donor = donor_idx,
-                    .hydrogen = h_idx,
-                    .acceptor = acc_idx,
-                    .distance = dist,
-                    .angle = angle_deg,
-                });
+                        const mag2 = @sqrt(dist_sq);
+                        if (mag2 < 1e-10) continue;
+
+                        // D-H...A angle via dot product.
+                        const dot_val = v1x * v2x + v1y * v2y + v1z * v2z;
+                        const cos_angle = std.math.clamp(dot_val / (mag1 * mag2), -1.0, 1.0);
+                        const angle_rad = std.math.acos(cos_angle);
+                        const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
+
+                        if (angle_deg >= config.angle_cutoff) {
+                            try result.append(allocator, .{
+                                .donor = donor_idx,
+                                .hydrogen = h_idx,
+                                .acceptor = acc_idx,
+                                .distance = dist,
+                                .angle = angle_deg,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
-
-    return result.toOwnedSlice(allocator);
 }
 
 // ============================================================================
@@ -146,18 +342,16 @@ const DHBond = struct {
 };
 
 /// Worker function for parallel hydrogen bond detection.
-/// Each worker processes a slice of the pre-scanned D-H bond list.
+/// Each worker processes a slice of the pre-scanned D-H bond list using a shared cell list.
 fn hbondWorker(
     dh_bonds: []const DHBond,
-    topology: types.Topology,
     frame: types.Frame,
     config: Config,
+    cell_list: *const CellList,
     result: *std.ArrayList(HBond),
     allocator: std.mem.Allocator,
     had_oom: *bool,
 ) void {
-    const n_atoms = topology.atoms.len;
-
     for (dh_bonds) |dh| {
         const donor_idx = dh.donor_idx;
         const h_idx = dh.h_idx;
@@ -174,43 +368,64 @@ fn hbondWorker(
         const mag1 = @sqrt(v1x * v1x + v1y * v1y + v1z * v1z);
         if (mag1 < 1e-10) continue;
 
-        for (0..n_atoms) |acc_raw| {
-            const acc_idx: u32 = @intCast(acc_raw);
-            if (acc_idx == donor_idx or acc_idx == h_idx) continue;
+        // Determine the cell of the hydrogen atom and iterate 27 neighboring cells.
+        const h_cell_x = @min(@as(u32, @intFromFloat(@max(0.0, (frame.x[h_idx] - cell_list.min_x) * cell_list.inv_cell_size))), cell_list.nx - 1);
+        const h_cell_y = @min(@as(u32, @intFromFloat(@max(0.0, (frame.y[h_idx] - cell_list.min_y) * cell_list.inv_cell_size))), cell_list.ny - 1);
+        const h_cell_z = @min(@as(u32, @intFromFloat(@max(0.0, (frame.z[h_idx] - cell_list.min_z) * cell_list.inv_cell_size))), cell_list.nz - 1);
 
-            const acc_elem = topology.atoms[acc_idx].element;
-            if (acc_elem != .N and acc_elem != .O and acc_elem != .S) continue;
+        const cx_lo: u32 = if (h_cell_x > 0) h_cell_x - 1 else 0;
+        const cx_hi: u32 = @min(h_cell_x + 1, cell_list.nx - 1);
+        const cy_lo: u32 = if (h_cell_y > 0) h_cell_y - 1 else 0;
+        const cy_hi: u32 = @min(h_cell_y + 1, cell_list.ny - 1);
+        const cz_lo: u32 = if (h_cell_z > 0) h_cell_z - 1 else 0;
+        const cz_hi: u32 = @min(h_cell_z + 1, cell_list.nz - 1);
 
-            // H...A vector.
-            const v2x: f64 = @as(f64, frame.x[acc_idx]) - hx;
-            const v2y: f64 = @as(f64, frame.y[acc_idx]) - hy;
-            const v2z: f64 = @as(f64, frame.z[acc_idx]) - hz;
+        var cx: u32 = cx_lo;
+        while (cx <= cx_hi) : (cx += 1) {
+            var cy: u32 = cy_lo;
+            while (cy <= cy_hi) : (cy += 1) {
+                var cz: u32 = cz_lo;
+                while (cz <= cz_hi) : (cz += 1) {
+                    const cell = cx * cell_list.ny * cell_list.nz + cy * cell_list.nz + cz;
+                    const start = cell_list.cell_offsets[cell];
+                    const end = cell_list.cell_offsets[cell + 1];
 
-            // H...A distance.
-            const dist_sq = v2x * v2x + v2y * v2y + v2z * v2z;
-            const dist: f32 = @floatCast(@sqrt(dist_sq));
-            if (dist > config.dist_cutoff) continue;
+                    for (cell_list.sorted_indices[start..end]) |acc_idx| {
+                        if (acc_idx == donor_idx or acc_idx == h_idx) continue;
 
-            const mag2 = @sqrt(dist_sq);
-            if (mag2 < 1e-10) continue;
+                        // H...A vector.
+                        const v2x: f64 = @as(f64, frame.x[acc_idx]) - hx;
+                        const v2y: f64 = @as(f64, frame.y[acc_idx]) - hy;
+                        const v2z: f64 = @as(f64, frame.z[acc_idx]) - hz;
 
-            // D-H...A angle via dot product.
-            const dot_val = v1x * v2x + v1y * v2y + v1z * v2z;
-            const cos_angle = std.math.clamp(dot_val / (mag1 * mag2), -1.0, 1.0);
-            const angle_rad = std.math.acos(cos_angle);
-            const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
+                        // H...A distance.
+                        const dist_sq = v2x * v2x + v2y * v2y + v2z * v2z;
+                        const dist: f32 = @floatCast(@sqrt(dist_sq));
+                        if (dist > config.dist_cutoff) continue;
 
-            if (angle_deg >= config.angle_cutoff) {
-                result.append(allocator, .{
-                    .donor = donor_idx,
-                    .hydrogen = h_idx,
-                    .acceptor = acc_idx,
-                    .distance = dist,
-                    .angle = angle_deg,
-                }) catch {
-                    had_oom.* = true;
-                    return;
-                };
+                        const mag2 = @sqrt(dist_sq);
+                        if (mag2 < 1e-10) continue;
+
+                        // D-H...A angle via dot product.
+                        const dot_val = v1x * v2x + v1y * v2y + v1z * v2z;
+                        const cos_angle = std.math.clamp(dot_val / (mag1 * mag2), -1.0, 1.0);
+                        const angle_rad = std.math.acos(cos_angle);
+                        const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
+
+                        if (angle_deg >= config.angle_cutoff) {
+                            result.append(allocator, .{
+                                .donor = donor_idx,
+                                .hydrogen = h_idx,
+                                .acceptor = acc_idx,
+                                .distance = dist,
+                                .angle = angle_deg,
+                            }) catch {
+                                had_oom.* = true;
+                                return;
+                            };
+                        }
+                    }
+                }
             }
         }
     }
@@ -265,6 +480,10 @@ pub fn detectParallel(
         return allocator.alloc(HBond, 0);
     }
 
+    // Build spatial cell list of acceptor atoms (shared across all workers).
+    var cell_list = try buildAcceptorCellList(allocator, frame, topology, config.dist_cutoff);
+    defer cell_list.deinit(allocator);
+
     // Don't use more threads than D-H bonds.
     const thread_count = @min(actual_threads, dh_bonds.len);
 
@@ -303,9 +522,9 @@ pub fn detectParallel(
         const this_chunk = chunk_size + @as(usize, if (t < remainder) 1 else 0);
         threads[t] = try std.Thread.spawn(.{}, hbondWorker, .{
             dh_bonds[offset..][0..this_chunk],
-            topology,
             frame,
             config,
+            &cell_list,
             &tl_lists[t],
             allocator,
             &oom_flags[t],
@@ -601,4 +820,123 @@ test "hbonds: no bonds in empty topology" {
     defer allocator.free(bonds);
 
     try std.testing.expectEqual(@as(usize, 0), bonds.len);
+}
+
+test "hbonds: cell list produces correct results with multiple acceptors" {
+    // 10-atom system with mixed elements, multiple D-H pairs and acceptors.
+    // Tests that the cell list spatial optimization finds the same bonds
+    // as a brute-force scan would.
+    const allocator = std.testing.allocator;
+
+    const n_atoms: u32 = 10;
+    const n_bonds: u32 = 2;
+
+    var topo = try types.Topology.init(allocator, .{
+        .n_atoms = n_atoms,
+        .n_residues = 1,
+        .n_chains = 1,
+        .n_bonds = n_bonds,
+    });
+    defer topo.deinit();
+
+    const FS4 = types.FixedString(4);
+    const FS5 = types.FixedString(5);
+
+    // Atom layout:
+    //  0: N  donor1     (0, 0, 0)
+    //  1: H  bonded to 0 (1, 0, 0)
+    //  2: O  acceptor   (2.3, 0, 0)   -- within cutoff of H1 (dist=1.3), angle~180
+    //  3: C  non-acceptor (3, 0, 0)
+    //  4: N  acceptor   (10, 0, 0)     -- far away, should NOT be detected
+    //  5: O  donor2     (0, 5, 0)
+    //  6: H  bonded to 5 (0, 6, 0)
+    //  7: S  acceptor   (0, 7.2, 0)   -- within cutoff of H6 (dist=1.2), angle~180
+    //  8: C  non-acceptor (0, 8, 0)
+    //  9: O  acceptor   (0, 6.5, 2.0) -- within cutoff of H6 (dist~2.06) but angle too small
+
+    topo.atoms[0] = .{ .name = FS4.fromSlice("N"), .element = .N, .residue_index = 0 };
+    topo.atoms[1] = .{ .name = FS4.fromSlice("H1"), .element = .H, .residue_index = 0 };
+    topo.atoms[2] = .{ .name = FS4.fromSlice("O"), .element = .O, .residue_index = 0 };
+    topo.atoms[3] = .{ .name = FS4.fromSlice("C"), .element = .C, .residue_index = 0 };
+    topo.atoms[4] = .{ .name = FS4.fromSlice("N2"), .element = .N, .residue_index = 0 };
+    topo.atoms[5] = .{ .name = FS4.fromSlice("O2"), .element = .O, .residue_index = 0 };
+    topo.atoms[6] = .{ .name = FS4.fromSlice("H2"), .element = .H, .residue_index = 0 };
+    topo.atoms[7] = .{ .name = FS4.fromSlice("S"), .element = .S, .residue_index = 0 };
+    topo.atoms[8] = .{ .name = FS4.fromSlice("C2"), .element = .C, .residue_index = 0 };
+    topo.atoms[9] = .{ .name = FS4.fromSlice("O3"), .element = .O, .residue_index = 0 };
+
+    topo.residues[0] = .{
+        .name = FS5.fromSlice("TST"),
+        .chain_index = 0,
+        .atom_range = .{ .start = 0, .len = n_atoms },
+        .resid = 1,
+    };
+    topo.chains[0] = .{
+        .name = FS4.fromSlice("A"),
+        .residue_range = .{ .start = 0, .len = 1 },
+    };
+
+    topo.bonds[0] = .{ .atom_i = 0, .atom_j = 1 }; // N-H bond (donor1)
+    topo.bonds[1] = .{ .atom_i = 5, .atom_j = 6 }; // O-H bond (donor2)
+
+    var frame = try types.Frame.init(allocator, n_atoms);
+    defer frame.deinit();
+
+    // Positions (Angstroms).
+    frame.x[0] = 0.0;
+    frame.y[0] = 0.0;
+    frame.z[0] = 0.0; // N donor1
+    frame.x[1] = 1.0;
+    frame.y[1] = 0.0;
+    frame.z[1] = 0.0; // H1
+    frame.x[2] = 2.3;
+    frame.y[2] = 0.0;
+    frame.z[2] = 0.0; // O acceptor (near H1)
+    frame.x[3] = 3.0;
+    frame.y[3] = 0.0;
+    frame.z[3] = 0.0; // C (not acceptor)
+    frame.x[4] = 10.0;
+    frame.y[4] = 0.0;
+    frame.z[4] = 0.0; // N2 acceptor (far away)
+    frame.x[5] = 0.0;
+    frame.y[5] = 5.0;
+    frame.z[5] = 0.0; // O donor2
+    frame.x[6] = 0.0;
+    frame.y[6] = 6.0;
+    frame.z[6] = 0.0; // H2
+    frame.x[7] = 0.0;
+    frame.y[7] = 7.2;
+    frame.z[7] = 0.0; // S acceptor (near H2)
+    frame.x[8] = 0.0;
+    frame.y[8] = 8.0;
+    frame.z[8] = 0.0; // C2 (not acceptor)
+    frame.x[9] = 0.0;
+    frame.y[9] = 6.5;
+    frame.z[9] = 2.0; // O3 acceptor (near H2 but bad angle)
+
+    const hbonds = try detect(allocator, topo, frame, .{});
+    defer allocator.free(hbonds);
+
+    // Expect exactly 2 H-bonds:
+    // 1) N(0)-H(1)...O(2): dist=1.3, angle=180
+    // 2) O(5)-H(6)...S(7): dist=1.2, angle=180
+    try std.testing.expectEqual(@as(usize, 2), hbonds.len);
+
+    // Verify both bonds are present (order may vary due to cell iteration order).
+    var found_nh_o = false;
+    var found_oh_s = false;
+    for (hbonds) |hb| {
+        if (hb.donor == 0 and hb.hydrogen == 1 and hb.acceptor == 2) {
+            found_nh_o = true;
+            try std.testing.expectApproxEqAbs(@as(f32, 1.3), hb.distance, 1e-4);
+            try std.testing.expectApproxEqAbs(@as(f32, 180.0), hb.angle, 1e-2);
+        }
+        if (hb.donor == 5 and hb.hydrogen == 6 and hb.acceptor == 7) {
+            found_oh_s = true;
+            try std.testing.expectApproxEqAbs(@as(f32, 1.2), hb.distance, 1e-4);
+            try std.testing.expectApproxEqAbs(@as(f32, 180.0), hb.angle, 1e-2);
+        }
+    }
+    try std.testing.expect(found_nh_o);
+    try std.testing.expect(found_oh_s);
 }
