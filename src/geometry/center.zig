@@ -19,6 +19,9 @@ pub fn ofMass(
     masses: []const f64,
     atom_indices: ?[]const u32,
 ) [3]f64 {
+    std.debug.assert(x.len == y.len);
+    std.debug.assert(x.len == z.len);
+    std.debug.assert(x.len == masses.len);
     if (atom_indices) |indices| {
         return ofMassIndexed(x, y, z, masses, indices);
     } else {
@@ -120,6 +123,8 @@ pub fn ofGeometry(
     z: []const f32,
     atom_indices: ?[]const u32,
 ) [3]f64 {
+    std.debug.assert(x.len == y.len);
+    std.debug.assert(x.len == z.len);
     if (atom_indices) |indices| {
         return ofGeometryIndexed(x, y, z, indices);
     } else {
@@ -128,7 +133,7 @@ pub fn ofGeometry(
 }
 
 /// SIMD-optimized center of geometry for all atoms.
-/// Accumulates in f32 vectors for speed, reduces to f64 at end.
+/// Accumulates in f64 vectors for precision, loads f32 coords and widens to f64.
 fn ofGeometryAll(
     x: []const f32,
     y: []const f32,
@@ -137,21 +142,25 @@ fn ofGeometryAll(
     const n = x.len;
     if (n == 0) return .{ 0.0, 0.0, 0.0 };
 
-    const V = vec_len_f32;
-    var sum_x: @Vector(V, f32) = @splat(0.0);
-    var sum_y: @Vector(V, f32) = @splat(0.0);
-    var sum_z: @Vector(V, f32) = @splat(0.0);
+    const V = vec_len_f64;
+    var sum_x: @Vector(V, f64) = @splat(0.0);
+    var sum_y: @Vector(V, f64) = @splat(0.0);
+    var sum_z: @Vector(V, f64) = @splat(0.0);
 
     var i: usize = 0;
     while (i + V <= n) : (i += V) {
-        sum_x += x[i..][0..V].*;
-        sum_y += y[i..][0..V].*;
-        sum_z += z[i..][0..V].*;
+        const vx: @Vector(V, f32) = x[i..][0..V].*;
+        const vy: @Vector(V, f32) = y[i..][0..V].*;
+        const vz: @Vector(V, f32) = z[i..][0..V].*;
+
+        sum_x += @as(@Vector(V, f64), @floatCast(vx));
+        sum_y += @as(@Vector(V, f64), @floatCast(vy));
+        sum_z += @as(@Vector(V, f64), @floatCast(vz));
     }
 
-    var rx: f64 = @as(f64, @reduce(.Add, sum_x));
-    var ry: f64 = @as(f64, @reduce(.Add, sum_y));
-    var rz: f64 = @as(f64, @reduce(.Add, sum_z));
+    var rx: f64 = @reduce(.Add, sum_x);
+    var ry: f64 = @reduce(.Add, sum_y);
+    var rz: f64 = @reduce(.Add, sum_z);
 
     // Scalar tail
     while (i < n) : (i += 1) {
@@ -176,6 +185,8 @@ fn ofGeometryIndexed(
     z: []const f32,
     indices: []const u32,
 ) [3]f64 {
+    if (indices.len == 0) return .{ 0.0, 0.0, 0.0 };
+
     var sum_x: f64 = 0.0;
     var sum_y: f64 = 0.0;
     var sum_z: f64 = 0.0;
@@ -185,8 +196,6 @@ fn ofGeometryIndexed(
         sum_y += @as(f64, y[idx]);
         sum_z += @as(f64, z[idx]);
     }
-
-    if (indices.len == 0) return .{ 0.0, 0.0, 0.0 };
 
     const n: f64 = @floatFromInt(indices.len);
 
@@ -283,7 +292,9 @@ test "center: empty atoms returns zero" {
 }
 
 test "large array exercises SIMD path: ofGeometry" {
-    const N = 100;
+    // N=103 is not divisible by common SIMD vector widths (4, 8, 16),
+    // ensuring the scalar tail path is exercised.
+    const N = 103;
     var x: [N]f32 = undefined;
     var y: [N]f32 = undefined;
     var z: [N]f32 = undefined;
@@ -297,10 +308,10 @@ test "large array exercises SIMD path: ofGeometry" {
 
     const cog = ofGeometry(&x, &y, &z, null);
 
-    // Mean of 0..99 = 49.5
-    try std.testing.expectApproxEqAbs(@as(f64, 49.5), cog[0], 1e-4);
-    try std.testing.expectApproxEqAbs(@as(f64, 99.0), cog[1], 1e-4);
-    try std.testing.expectApproxEqAbs(@as(f64, 148.5), cog[2], 1e-4);
+    // Mean of 0..102 = 51.0
+    try std.testing.expectApproxEqAbs(@as(f64, 51.0), cog[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 102.0), cog[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f64, 153.0), cog[2], 1e-4);
 }
 
 test "large array exercises SIMD path: ofMass" {
