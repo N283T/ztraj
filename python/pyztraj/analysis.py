@@ -291,8 +291,9 @@ def compute_sasa(
     n_points: int = 100,
     probe_radius: float = 1.4,
     n_threads: int = 0,
+    algorithm: str = "shrake_rupley",
 ) -> SasaResult:
-    """Compute Solvent Accessible Surface Area using Shrake-Rupley algorithm.
+    """Compute Solvent Accessible Surface Area.
 
     Args:
         structure: Structure from load_pdb().
@@ -300,10 +301,19 @@ def compute_sasa(
         n_points: Number of test points per atom sphere. Default 100.
         probe_radius: Probe radius in Angstroms. Default 1.4 (water).
         n_threads: Number of threads (0 = auto-detect). Default 0.
+        algorithm: "shrake_rupley" (default) or "shrake_rupley_bitmask".
+            The bitmask variant uses precomputed lookup tables for faster
+            occlusion testing. Requires n_points <= 1024.
 
     Returns:
         SasaResult with total_area and per-atom atom_areas.
     """
+    _algo_map = {"shrake_rupley": 0, "shrake_rupley_bitmask": 1}
+    if algorithm not in _algo_map:
+        msg = f"algorithm must be 'shrake_rupley' or 'shrake_rupley_bitmask', got '{algorithm}'"
+        raise ValueError(msg)
+    algo_id = _algo_map[algorithm]
+
     if n_points < 1:
         msg = f"n_points must be >= 1, got {n_points}"
         raise ValueError(msg)
@@ -339,6 +349,7 @@ def compute_sasa(
                 n_points,
                 probe_radius,
                 n_threads,
+                algo_id,
                 _ptr_f64(atom_areas),
                 total_area,
             ),

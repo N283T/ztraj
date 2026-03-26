@@ -1242,6 +1242,7 @@ export fn ztraj_compute_sasa(
     n_points: u32,
     probe_radius: f64,
     n_threads: usize,
+    algorithm: u32,
     atom_areas: [*]f64,
     total_area: *f64,
 ) callconv(.c) c_int {
@@ -1251,10 +1252,17 @@ export fn ztraj_compute_sasa(
     if (n_points == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (probe_radius <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
+    const algo: sasa_mod.Algorithm = switch (algorithm) {
+        0 => .shrake_rupley,
+        1 => .shrake_rupley_bitmask,
+        else => return ZTRAJ_ERROR_INVALID_INPUT,
+    };
+
     const config = sasa_mod.SasaConfig{
         .n_points = n_points,
         .probe_radius = probe_radius,
         .n_threads = n_threads,
+        .algorithm = algo,
     };
 
     var result = sasa_mod.compute(
