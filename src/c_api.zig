@@ -1049,6 +1049,7 @@ export fn ztraj_rdf(
     n_bins: u32,
     r_out: [*]f64,
     g_r_out: [*]f64,
+    n_threads: u32,
 ) callconv(.c) c_int {
     if (n_sel1 == 0 or n_sel2 == 0 or n_bins == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (r_max <= r_min) return ZTRAJ_ERROR_INVALID_INPUT;
@@ -1060,7 +1061,9 @@ export fn ztraj_rdf(
         .n_bins = n_bins,
     };
 
-    var rdf_result = rdf_mod.compute(
+    const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
+
+    var rdf_result = rdf_mod.computeParallel(
         c_allocator,
         sel1_x[0..n_sel1],
         sel1_y[0..n_sel1],
@@ -1070,6 +1073,7 @@ export fn ztraj_rdf(
         sel2_z[0..n_sel2],
         box_volume,
         config,
+        thread_count,
     ) catch {
         return ZTRAJ_ERROR_OUT_OF_MEMORY;
     };
@@ -1112,6 +1116,7 @@ export fn ztraj_detect_hbonds(
     hbonds_out: [*]CHBond,
     capacity: usize,
     n_found: *usize,
+    n_threads: u32,
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
@@ -1124,7 +1129,9 @@ export fn ztraj_detect_hbonds(
         .angle_cutoff = angle_cutoff,
     };
 
-    const hbonds = hbonds_mod.detect(c_allocator, h.parse_result.topology, frame, config) catch {
+    const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
+
+    const hbonds = hbonds_mod.detectParallel(c_allocator, h.parse_result.topology, frame, config, thread_count) catch {
         return ZTRAJ_ERROR_OUT_OF_MEMORY;
     };
     defer c_allocator.free(hbonds);
@@ -1331,6 +1338,7 @@ export fn ztraj_msd(
     atom_indices: ?[*]const u32,
     n_indices: usize,
     result: [*]f64,
+    n_threads: u32,
 ) callconv(.c) c_int {
     if (n_frames == 0 or n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
 
@@ -1352,10 +1360,13 @@ export fn ztraj_msd(
         );
     }
 
-    const msd_result = msd_mod.compute(c_allocator, frames, indices) catch |err| {
+    const thread_count: usize = if (n_threads == 0) (std.Thread.getCpuCount() catch 1) else @intCast(n_threads);
+
+    const msd_result = msd_mod.computeParallel(c_allocator, frames, indices, thread_count) catch |err| {
         return switch (err) {
             error.NoFrames, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
-            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            error.OutOfMemory, error.LockedMemoryLimitExceeded => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            error.SystemResources, error.Unexpected, error.ThreadQuotaExceeded => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
     };
     defer c_allocator.free(msd_result);

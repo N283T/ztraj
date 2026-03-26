@@ -136,6 +136,217 @@ pub fn detect(
 }
 
 // ============================================================================
+// Parallel implementation
+// ============================================================================
+
+/// A pre-scanned donor-hydrogen bond pair.
+const DHBond = struct {
+    donor_idx: u32,
+    h_idx: u32,
+};
+
+/// Worker function for parallel hydrogen bond detection.
+/// Each worker processes a slice of the pre-scanned D-H bond list.
+fn hbondWorker(
+    dh_bonds: []const DHBond,
+    topology: types.Topology,
+    frame: types.Frame,
+    config: Config,
+    result: *std.ArrayList(HBond),
+    allocator: std.mem.Allocator,
+    had_oom: *bool,
+) void {
+    const n_atoms = topology.atoms.len;
+
+    for (dh_bonds) |dh| {
+        const donor_idx = dh.donor_idx;
+        const h_idx = dh.h_idx;
+
+        // Pre-fetch H position in f64.
+        const hx: f64 = @floatCast(frame.x[h_idx]);
+        const hy: f64 = @floatCast(frame.y[h_idx]);
+        const hz: f64 = @floatCast(frame.z[h_idx]);
+
+        // D-H vector (donor minus hydrogen).
+        const v1x: f64 = @as(f64, frame.x[donor_idx]) - hx;
+        const v1y: f64 = @as(f64, frame.y[donor_idx]) - hy;
+        const v1z: f64 = @as(f64, frame.z[donor_idx]) - hz;
+        const mag1 = @sqrt(v1x * v1x + v1y * v1y + v1z * v1z);
+        if (mag1 < 1e-10) continue;
+
+        for (0..n_atoms) |acc_raw| {
+            const acc_idx: u32 = @intCast(acc_raw);
+            if (acc_idx == donor_idx or acc_idx == h_idx) continue;
+
+            const acc_elem = topology.atoms[acc_idx].element;
+            if (acc_elem != .N and acc_elem != .O and acc_elem != .S) continue;
+
+            // H...A vector.
+            const v2x: f64 = @as(f64, frame.x[acc_idx]) - hx;
+            const v2y: f64 = @as(f64, frame.y[acc_idx]) - hy;
+            const v2z: f64 = @as(f64, frame.z[acc_idx]) - hz;
+
+            // H...A distance.
+            const dist_sq = v2x * v2x + v2y * v2y + v2z * v2z;
+            const dist: f32 = @floatCast(@sqrt(dist_sq));
+            if (dist > config.dist_cutoff) continue;
+
+            const mag2 = @sqrt(dist_sq);
+            if (mag2 < 1e-10) continue;
+
+            // D-H...A angle via dot product.
+            const dot_val = v1x * v2x + v1y * v2y + v1z * v2z;
+            const cos_angle = std.math.clamp(dot_val / (mag1 * mag2), -1.0, 1.0);
+            const angle_rad = std.math.acos(cos_angle);
+            const angle_deg: f32 = @floatCast(angle_rad * (180.0 / std.math.pi));
+
+            if (angle_deg >= config.angle_cutoff) {
+                result.append(allocator, .{
+                    .donor = donor_idx,
+                    .hydrogen = h_idx,
+                    .acceptor = acc_idx,
+                    .distance = dist,
+                    .angle = angle_deg,
+                }) catch {
+                    had_oom.* = true;
+                    return;
+                };
+            }
+        }
+    }
+}
+
+/// Multi-threaded version of `detect`.
+///
+/// Pre-scans topology bonds to build a list of D-H pairs, then distributes
+/// them across threads. Each thread independently scans all atoms for
+/// acceptors. Falls back to single-threaded `detect` when `n_threads <= 1`
+/// or the bond count is too small.
+///
+/// Note: The provided `allocator` must be thread-safe (e.g. the default general-
+/// purpose allocator, `page_allocator`, or a thread-safe arena). Using a non-
+/// thread-safe allocator will cause data races.
+///
+/// The returned slice is owned by the caller; free with `allocator.free()`.
+pub fn detectParallel(
+    allocator: std.mem.Allocator,
+    topology: types.Topology,
+    frame: types.Frame,
+    config: Config,
+    n_threads: usize,
+) ![]HBond {
+    // Fallback to single-threaded for small workloads.
+    if (n_threads <= 1 or topology.bonds.len < 16) {
+        return detect(allocator, topology, frame, config);
+    }
+
+    const cpu_count = std.Thread.getCpuCount() catch {
+        return detect(allocator, topology, frame, config);
+    };
+    const actual_threads = @min(n_threads, cpu_count);
+
+    // Pre-scan bonds to collect D-H pairs.
+    var dh_list = std.ArrayList(DHBond){};
+    defer dh_list.deinit(allocator);
+
+    for (topology.bonds) |bond| {
+        const a1 = topology.atoms[bond.atom_i];
+        const a2 = topology.atoms[bond.atom_j];
+
+        if (a1.element == .H and (a2.element == .N or a2.element == .O)) {
+            try dh_list.append(allocator, .{ .donor_idx = bond.atom_j, .h_idx = bond.atom_i });
+        } else if (a2.element == .H and (a1.element == .N or a1.element == .O)) {
+            try dh_list.append(allocator, .{ .donor_idx = bond.atom_i, .h_idx = bond.atom_j });
+        }
+    }
+
+    const dh_bonds = dh_list.items;
+    if (dh_bonds.len == 0) {
+        return allocator.alloc(HBond, 0);
+    }
+
+    // Don't use more threads than D-H bonds.
+    const thread_count = @min(actual_threads, dh_bonds.len);
+
+    // Per-thread OOM flags.
+    const oom_flags = try allocator.alloc(bool, thread_count);
+    defer allocator.free(oom_flags);
+    for (0..thread_count) |t| {
+        oom_flags[t] = false;
+    }
+
+    // Thread-local ArrayLists (zero-initialized = safe for defer).
+    const tl_lists = try allocator.alloc(std.ArrayList(HBond), thread_count);
+    defer allocator.free(tl_lists);
+    for (0..thread_count) |t| {
+        tl_lists[t] = std.ArrayList(HBond){};
+    }
+    defer for (0..thread_count) |t| {
+        tl_lists[t].deinit(allocator);
+    };
+
+    // Partition D-H bonds across threads.
+    const chunk_size = dh_bonds.len / thread_count;
+    const remainder = dh_bonds.len % thread_count;
+
+    // Spawn threads.
+    const threads = try allocator.alloc(std.Thread, thread_count);
+    defer allocator.free(threads);
+
+    var spawned: usize = 0;
+    errdefer for (threads[0..spawned]) |thread| {
+        thread.join();
+    };
+
+    var offset: usize = 0;
+    for (0..thread_count) |t| {
+        const this_chunk = chunk_size + @as(usize, if (t < remainder) 1 else 0);
+        threads[t] = try std.Thread.spawn(.{}, hbondWorker, .{
+            dh_bonds[offset..][0..this_chunk],
+            topology,
+            frame,
+            config,
+            &tl_lists[t],
+            allocator,
+            &oom_flags[t],
+        });
+        spawned += 1;
+        offset += this_chunk;
+    }
+
+    // Join all threads.
+    for (threads[0..spawned]) |thread| {
+        thread.join();
+    }
+    spawned = 0;
+
+    // Check for OOM in any worker.
+    for (0..thread_count) |t| {
+        if (oom_flags[t]) return error.OutOfMemory;
+    }
+
+    // Count total and concatenate.
+    var total: usize = 0;
+    for (0..thread_count) |t| {
+        total += tl_lists[t].items.len;
+    }
+
+    const result = try allocator.alloc(HBond, total);
+    errdefer allocator.free(result);
+
+    var concat_offset: usize = 0;
+    for (0..thread_count) |t| {
+        const items = tl_lists[t].items;
+        if (items.len > 0) {
+            @memcpy(result[concat_offset..][0..items.len], items);
+            concat_offset += items.len;
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -344,6 +555,32 @@ test "hbonds: sulfur acceptor is detected" {
 
     try std.testing.expectEqual(@as(usize, 1), bonds.len);
     try std.testing.expectEqual(@as(u32, 2), bonds[0].acceptor);
+}
+
+test "hbonds: detectParallel matches single-threaded detect" {
+    const allocator = std.testing.allocator;
+
+    // Linear geometry: N at (0,0,0), H at (1,0,0), O at (2.5,0,0).
+    var sys = try makeTestSystem(allocator, 1.0, 0.0, 0.0, 2.5, 0.0, 0.0);
+    defer sys.topo.deinit();
+    defer sys.frame.deinit();
+
+    // Single-threaded.
+    const st_bonds = try detect(allocator, sys.topo, sys.frame, .{});
+    defer allocator.free(st_bonds);
+
+    // Multi-threaded (falls back because bonds < 16, so result must match).
+    const mt_bonds = try detectParallel(allocator, sys.topo, sys.frame, .{}, 4);
+    defer allocator.free(mt_bonds);
+
+    try std.testing.expectEqual(st_bonds.len, mt_bonds.len);
+    for (st_bonds, mt_bonds) |st, mt| {
+        try std.testing.expectEqual(st.donor, mt.donor);
+        try std.testing.expectEqual(st.hydrogen, mt.hydrogen);
+        try std.testing.expectEqual(st.acceptor, mt.acceptor);
+        try std.testing.expectApproxEqAbs(st.distance, mt.distance, 1e-4);
+        try std.testing.expectApproxEqAbs(st.angle, mt.angle, 1e-2);
+    }
 }
 
 test "hbonds: no bonds in empty topology" {
