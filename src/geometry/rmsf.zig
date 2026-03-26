@@ -207,13 +207,13 @@ pub fn computeParallel(
         return compute(allocator, frames, atom_indices);
     }
 
-    if (frames.len == 0) return error.NoFrames;
-
     const n_frames: f64 = @floatFromInt(frames.len);
     const first = frames[0];
     const n_atoms: usize = if (atom_indices) |idx| idx.len else first.nAtoms();
 
-    const cpu_count = try std.Thread.getCpuCount();
+    const cpu_count = std.Thread.getCpuCount() catch {
+        return compute(allocator, frames, atom_indices);
+    };
     const actual_threads = @min(n_threads, cpu_count);
     // Don't use more threads than frames
     const thread_count = @min(actual_threads, frames.len);
@@ -226,6 +226,18 @@ pub fn computeParallel(
     const tl_sum_z = try allocator.alloc([]f64, thread_count);
     defer allocator.free(tl_sum_z);
 
+    // Initialize to empty slices so defer-free is safe on partial allocation failure
+    for (0..thread_count) |t| {
+        tl_sum_x[t] = &.{};
+        tl_sum_y[t] = &.{};
+        tl_sum_z[t] = &.{};
+    }
+    defer for (0..thread_count) |t| {
+        if (tl_sum_x[t].len > 0) allocator.free(tl_sum_x[t]);
+        if (tl_sum_y[t].len > 0) allocator.free(tl_sum_y[t]);
+        if (tl_sum_z[t].len > 0) allocator.free(tl_sum_z[t]);
+    };
+
     for (0..thread_count) |t| {
         tl_sum_x[t] = try allocator.alloc(f64, n_atoms);
         @memset(tl_sum_x[t], 0.0);
@@ -234,16 +246,15 @@ pub fn computeParallel(
         tl_sum_z[t] = try allocator.alloc(f64, n_atoms);
         @memset(tl_sum_z[t], 0.0);
     }
-    defer for (0..thread_count) |t| {
-        allocator.free(tl_sum_x[t]);
-        allocator.free(tl_sum_y[t]);
-        allocator.free(tl_sum_z[t]);
-    };
 
     // Spawn threads for pass 1 (mean positions)
     const threads = try allocator.alloc(std.Thread, thread_count);
     defer allocator.free(threads);
 
+    var pass1_spawned: usize = 0;
+    errdefer for (threads[0..pass1_spawned]) |thread| {
+        thread.join();
+    };
     for (0..thread_count) |t| {
         const frame_start = t * frames.len / thread_count;
         const frame_end = (t + 1) * frames.len / thread_count;
@@ -254,6 +265,7 @@ pub fn computeParallel(
             tl_sum_y[t],
             tl_sum_z[t],
         });
+        pass1_spawned += 1;
     }
     for (threads) |thread| {
         thread.join();
@@ -279,15 +291,25 @@ pub fn computeParallel(
     // Allocate thread-local msd arrays for pass 2
     const tl_msd = try allocator.alloc([]f64, thread_count);
     defer allocator.free(tl_msd);
+
+    // Initialize to empty slices so defer-free is safe on partial allocation failure
+    for (0..thread_count) |t| {
+        tl_msd[t] = &.{};
+    }
+    defer for (1..thread_count) |t| {
+        if (tl_msd[t].len > 0) allocator.free(tl_msd[t]);
+    };
+
     for (0..thread_count) |t| {
         tl_msd[t] = try allocator.alloc(f64, n_atoms);
         @memset(tl_msd[t], 0.0);
     }
-    defer for (1..thread_count) |t| {
-        allocator.free(tl_msd[t]);
-    };
 
     // Spawn threads for pass 2 (MSD)
+    var pass2_spawned: usize = 0;
+    errdefer for (threads[0..pass2_spawned]) |thread| {
+        thread.join();
+    };
     for (0..thread_count) |t| {
         const frame_start = t * frames.len / thread_count;
         const frame_end = (t + 1) * frames.len / thread_count;
@@ -299,6 +321,7 @@ pub fn computeParallel(
             mean_z,
             tl_msd[t],
         });
+        pass2_spawned += 1;
     }
     for (threads) |thread| {
         thread.join();
@@ -469,6 +492,74 @@ test "rmsf: computeParallel matches single-threaded compute" {
 
     try std.testing.expectEqual(ref_idx.len, par_idx.len);
     for (ref_idx, par_idx) |r, p| {
+        try std.testing.expectApproxEqAbs(r, p, 1e-10);
+    }
+}
+
+test "rmsf: computeParallel with 32 atoms exercises SIMD path" {
+    const allocator = std.testing.allocator;
+
+    const n_frames = 8;
+    const n_atoms = 32;
+
+    var frames: [n_frames]types.Frame = undefined;
+    for (&frames, 0..) |*f, fi| {
+        f.* = try types.Frame.init(allocator, n_atoms);
+        const t: f32 = @floatFromInt(fi);
+        for (0..n_atoms) |a| {
+            const ai: f32 = @floatFromInt(a);
+            f.x[a] = ai * 0.5 + @sin(t * 0.3 + ai * 0.1);
+            f.y[a] = ai * 0.3 - @cos(t * 0.5 + ai * 0.2);
+            f.z[a] = (t - 3.0) * (ai + 1.0) * 0.1;
+        }
+    }
+    defer for (&frames) |*f| f.deinit();
+
+    const ref = try compute(allocator, &frames, null);
+    defer allocator.free(ref);
+
+    const par = try computeParallel(allocator, &frames, null, 4);
+    defer allocator.free(par);
+
+    try std.testing.expectEqual(ref.len, par.len);
+    for (ref, par) |r, p| {
+        try std.testing.expectApproxEqAbs(r, p, 1e-10);
+    }
+}
+
+test "rmsf: computeParallel caps threads when more than frames" {
+    const allocator = std.testing.allocator;
+
+    // Only 2 frames but request 16 threads -- should cap to 2 threads
+    const n_atoms = 4;
+
+    var frame1 = try types.Frame.init(allocator, n_atoms);
+    defer frame1.deinit();
+    var frame2 = try types.Frame.init(allocator, n_atoms);
+    defer frame2.deinit();
+
+    for (0..n_atoms) |a| {
+        const ai: f32 = @floatFromInt(a);
+        frame1.x[a] = ai;
+        frame1.y[a] = 0.0;
+        frame1.z[a] = 0.0;
+        frame2.x[a] = ai + 1.0;
+        frame2.y[a] = 0.0;
+        frame2.z[a] = 0.0;
+    }
+
+    const frames = [_]types.Frame{ frame1, frame2 };
+
+    const ref = try compute(allocator, &frames, null);
+    defer allocator.free(ref);
+
+    // Request 16 threads with only 2 frames; falls back to single-threaded
+    // because frames.len < 4, exercising the fallback path
+    const par = try computeParallel(allocator, &frames, null, 16);
+    defer allocator.free(par);
+
+    try std.testing.expectEqual(ref.len, par.len);
+    for (ref, par) |r, p| {
         try std.testing.expectApproxEqAbs(r, p, 1e-10);
     }
 }
