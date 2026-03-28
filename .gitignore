@@ -2,3 +2,5 @@ zig-out/
 .zig-cache/
 result
 docs/superpowers/
+notebooks/.venv/
+notebooks/uv.lock
