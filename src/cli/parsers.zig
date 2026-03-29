@@ -10,13 +10,17 @@ const select = ztraj.select;
 // Atom selection helper
 // ============================================================================
 
+fn printStderr(msg: []const u8) void {
+    std.fs.File.stderr().writeAll(msg) catch {};
+}
+
 fn requireNonEmptySelection(allocator: std.mem.Allocator, selection: []u32, sel_str: []const u8) ![]u32 {
     if (selection.len > 0) return selection;
     allocator.free(selection);
-    std.io.getStdErr().writer().print(
-        "error: selection '{s}' matched no atoms in the topology\n",
-        .{sel_str},
-    ) catch {};
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "error: selection '{s}' matched no atoms in the topology\n", .{sel_str}) catch
+        "error: selection matched no atoms in the topology\n";
+    printStderr(msg);
     return error.EmptySelection;
 }
 
@@ -114,10 +118,10 @@ pub fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) 
     for (tuples, 0..) |tuple, ti| {
         for (tuple) |idx| {
             if (idx >= n_atoms) {
-                std.io.getStdErr().writer().print(
-                    "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n",
-                    .{ idx, ti, n_atoms },
-                ) catch {};
+                var buf: [128]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n", .{ idx, ti, n_atoms }) catch
+                    "error: atom index out of range\n";
+                printStderr(msg);
                 return error.IndexOutOfRange;
             }
         }

@@ -6,6 +6,10 @@ const ztraj = @import("ztraj");
 const types = ztraj.types;
 const io = ztraj.io;
 
+fn printStderr(msg: []const u8) void {
+    std.fs.File.stderr().writeAll(msg) catch {};
+}
+
 // ============================================================================
 // File extension helpers
 // ============================================================================
@@ -60,10 +64,7 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
     } else if (isGro(path)) {
         return io.gro.parse(allocator, data);
     } else {
-        std.io.getStdErr().writer().print(
-            "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif, .gro)\n",
-            .{path},
-        ) catch {};
+        printStderr("error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro)\n");
         return error.UnsupportedFormat;
     }
 }
@@ -82,10 +83,10 @@ pub const TrajectoryInfo = struct {
 fn ensureAtomCount(path: []const u8, expected: usize, actual: usize) !void {
     if (expected == actual) return;
 
-    std.io.getStdErr().writer().print(
-        "error: '{s}' has {d} atoms but topology expects {d}\n",
-        .{ path, actual, expected },
-    ) catch {};
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "error: '{s}' has {d} atoms but topology expects {d}\n", .{ path, actual, expected }) catch
+        "error: atom count mismatch between trajectory and topology\n";
+    printStderr(msg);
     return error.InvalidAtomCount;
 }
 
@@ -162,11 +163,8 @@ pub fn loadTrajectoryInfo(
     }
 }
 
-fn unsupportedTrajectoryFormat(path: []const u8) error{UnsupportedFormat} {
-    std.io.getStdErr().writer().print(
-        "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
-        .{path},
-    ) catch {};
+fn unsupportedTrajectoryFormat(_: []const u8) error{UnsupportedFormat} {
+    printStderr("error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n");
     return error.UnsupportedFormat;
 }
 
