@@ -84,6 +84,29 @@ def _load_topology_handle(structure, lib, ffi, operation: str = ""):
     return handle_ptr[0]
 
 
+def _validate_masses(masses: NDArray[np.float64], n_atoms: int) -> NDArray[np.float64]:
+    """Normalize and validate a 1D mass array."""
+    masses = np.ascontiguousarray(masses, dtype=np.float64)
+    if masses.ndim != 1 or masses.shape[0] != n_atoms:
+        msg = f"masses must have shape ({n_atoms},), got {masses.shape}"
+        raise ValueError(msg)
+    return masses
+
+
+def _validate_structure_coords(
+    structure,
+    coords: NDArray[np.float32],
+    label: str,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
+    """Validate that coords match the structure atom count."""
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+    if n_atoms != structure.n_atoms:
+        msg = f"{label}: coords has {n_atoms} atoms but structure has {structure.n_atoms}"
+        raise ValueError(msg)
+    return x, y, z, n_atoms
+
+
 def _pack_frames(
     frames: list[NDArray[np.float32]],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, int]:

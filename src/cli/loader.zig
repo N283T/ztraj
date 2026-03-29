@@ -6,6 +6,10 @@ const ztraj = @import("ztraj");
 const types = ztraj.types;
 const io = ztraj.io;
 
+fn printStderr(msg: []const u8) void {
+    std.fs.File.stderr().writeAll(msg) catch {};
+}
+
 // ============================================================================
 // File extension helpers
 // ============================================================================
@@ -60,17 +64,109 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
     } else if (isGro(path)) {
         return io.gro.parse(allocator, data);
     } else {
-        std.debug.print(
-            "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif, .gro)\n",
-            .{path},
-        );
-        std.process.exit(1);
+        printStderr("error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro)\n");
+        return error.UnsupportedFormat;
     }
 }
 
 // ============================================================================
 // Frame collection
 // ============================================================================
+
+/// Summary information for a trajectory or single-structure file.
+pub const TrajectoryInfo = struct {
+    n_frames: usize,
+    first_time: ?f32,
+    last_time: ?f32,
+};
+
+fn ensureAtomCount(path: []const u8, expected: usize, actual: usize) !void {
+    if (expected == actual) return;
+
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "error: '{s}' has {d} atoms but topology expects {d}\n", .{ path, actual, expected }) catch
+        "error: atom count mismatch between trajectory and topology\n";
+    printStderr(msg);
+    return error.InvalidAtomCount;
+}
+
+/// Count frames and capture the first/last timestamps without materializing
+/// every frame in memory.
+pub fn loadTrajectoryInfo(
+    allocator: std.mem.Allocator,
+    traj_path: []const u8,
+    expected_n_atoms: ?usize,
+) !TrajectoryInfo {
+    if (isXtc(traj_path)) {
+        var reader = try io.xtc.XtcReader.open(allocator, traj_path);
+        defer reader.deinit();
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+
+        var n_frames: usize = 0;
+        var first_time: ?f32 = null;
+        var last_time: ?f32 = null;
+        while (try reader.next()) |frame_ptr| {
+            if (first_time == null) first_time = frame_ptr.time;
+            last_time = frame_ptr.time;
+            n_frames += 1;
+        }
+        return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
+    } else if (isDcd(traj_path)) {
+        var reader = try io.dcd.DcdReader.open(allocator, traj_path);
+        defer reader.deinit();
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+
+        var n_frames: usize = 0;
+        var first_time: ?f32 = null;
+        var last_time: ?f32 = null;
+        while (try reader.next()) |frame_ptr| {
+            if (first_time == null) first_time = frame_ptr.time;
+            last_time = frame_ptr.time;
+            n_frames += 1;
+        }
+        return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
+    } else if (isTrr(traj_path)) {
+        var reader = try io.trr.TrrReader.open(allocator, traj_path);
+        defer reader.deinit();
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+
+        var n_frames: usize = 0;
+        var first_time: ?f32 = null;
+        var last_time: ?f32 = null;
+        while (try reader.next()) |frame_ptr| {
+            if (first_time == null) first_time = frame_ptr.time;
+            last_time = frame_ptr.time;
+            n_frames += 1;
+        }
+        return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
+    } else {
+        const data = try std.fs.cwd().readFileAlloc(allocator, traj_path, 512 * 1024 * 1024);
+        defer allocator.free(data);
+
+        var pr: types.ParseResult = if (isPdb(traj_path))
+            try io.pdb.parse(allocator, data)
+        else if (isCif(traj_path))
+            try io.mmcif.parse(allocator, data)
+        else if (isGro(traj_path))
+            try io.gro.parse(allocator, data)
+        else {
+            return unsupportedTrajectoryFormat(traj_path);
+        };
+        defer pr.deinit();
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, pr.frame.nAtoms());
+
+        return .{
+            .n_frames = 1,
+            .first_time = pr.frame.time,
+            .last_time = pr.frame.time,
+        };
+    }
+}
+
+fn unsupportedTrajectoryFormat(_: []const u8) error{UnsupportedFormat} {
+    printStderr("error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n");
+    return error.UnsupportedFormat;
+}
 
 /// Load every frame from a trajectory or single-structure file.
 /// Returns allocated []Frame (caller frees each frame then the slice).
@@ -90,6 +186,7 @@ pub fn loadAllFrames(
     if (isXtc(traj_path)) {
         var reader = try io.xtc.XtcReader.open(allocator, traj_path);
         defer reader.deinit();
+        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -104,6 +201,7 @@ pub fn loadAllFrames(
     } else if (isDcd(traj_path)) {
         var reader = try io.dcd.DcdReader.open(allocator, traj_path);
         defer reader.deinit();
+        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -118,6 +216,7 @@ pub fn loadAllFrames(
     } else if (isTrr(traj_path)) {
         var reader = try io.trr.TrrReader.open(allocator, traj_path);
         defer reader.deinit();
+        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -140,13 +239,12 @@ pub fn loadAllFrames(
         else if (isGro(traj_path))
             try io.gro.parse(allocator, data)
         else {
-            std.debug.print(
-                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
-                .{traj_path},
-            );
-            std.process.exit(1);
+            return unsupportedTrajectoryFormat(traj_path);
         };
-        pr.topology.deinit();
+        errdefer pr.frame.deinit();
+        defer pr.topology.deinit();
+
+        try ensureAtomCount(traj_path, n_atoms, pr.frame.nAtoms());
         try frames.append(allocator, pr.frame);
         progress_node.completeOne();
     }
@@ -165,4 +263,55 @@ pub fn loadAllFramesWithProgress(
     const load_node = progress_root.start("Loading frames", 0);
     defer load_node.end();
     return loadAllFrames(allocator, traj_path, n_atoms, load_node);
+}
+
+test "loadTrajectoryInfo counts frames without materializing them" {
+    const allocator = std.testing.allocator;
+    const info = try loadTrajectoryInfo(allocator, "validation/test_data/3tvj_I_R1.xtc", null);
+    try std.testing.expect(info.n_frames > 0);
+    try std.testing.expect(info.first_time != null);
+    try std.testing.expect(info.last_time != null);
+    try std.testing.expect(info.last_time.? >= info.first_time.?);
+}
+
+test "loadTrajectoryInfo handles single-structure files" {
+    const allocator = std.testing.allocator;
+    const info = try loadTrajectoryInfo(allocator, "test_data/1l2y.pdb", null);
+    try std.testing.expectEqual(@as(usize, 1), info.n_frames);
+    try std.testing.expect(info.first_time != null);
+    try std.testing.expect(info.last_time != null);
+}
+
+test "loadTrajectoryInfo rejects mismatched trajectory atom count" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(
+        error.InvalidAtomCount,
+        loadTrajectoryInfo(allocator, "validation/test_data/3tvj_I_R1.xtc", 1),
+    );
+}
+
+test "loadAllFrames rejects mismatched trajectory atom count" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(
+        error.InvalidAtomCount,
+        loadAllFrames(allocator, "validation/test_data/3tvj_I_R1.xtc", 1, std.Progress.Node.none),
+    );
+}
+
+test "loadAllFrames rejects mismatched structure atom count" {
+    const allocator = std.testing.allocator;
+    try std.testing.expectError(
+        error.InvalidAtomCount,
+        loadAllFrames(allocator, "test_data/1l2y.pdb", 1, std.Progress.Node.none),
+    );
+}
+
+test "loadTopology rejects unsupported format" {
+    const allocator = std.testing.allocator;
+    // Rename check: use an existing file but with unsupported extension
+    // The file will be read successfully but format detection should fail.
+    try std.testing.expectError(
+        error.UnsupportedFormat,
+        loadTopology(allocator, "build.zig"),
+    );
 }

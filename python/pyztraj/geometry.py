@@ -16,6 +16,8 @@ from pyztraj._helpers import (
     _ptr_f64,
     _ptr_u32,
     _to_soa,
+    _validate_masses,
+    _validate_structure_coords,
 )
 
 if TYPE_CHECKING:
@@ -185,8 +187,8 @@ def compute_rg(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -229,8 +231,8 @@ def compute_center_of_mass(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -321,8 +323,8 @@ def compute_inertia(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -596,8 +598,7 @@ def _compute_dihedral(
     ffi = get_ffi()
     lib = get_lib()
 
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, label)
 
     handle = _load_topology_handle(structure, lib, ffi, label)
 
@@ -668,8 +669,7 @@ def compute_chi(
     ffi = get_ffi()
     lib = get_lib()
 
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "compute_chi")
 
     handle = _load_topology_handle(structure, lib, ffi, "compute_chi")
 

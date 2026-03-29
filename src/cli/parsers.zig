@@ -10,6 +10,20 @@ const select = ztraj.select;
 // Atom selection helper
 // ============================================================================
 
+fn printStderr(msg: []const u8) void {
+    std.fs.File.stderr().writeAll(msg) catch {};
+}
+
+fn requireNonEmptySelection(allocator: std.mem.Allocator, selection: []u32, sel_str: []const u8) ![]u32 {
+    if (selection.len > 0) return selection;
+    allocator.free(selection);
+    var buf: [256]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "error: selection '{s}' matched no atoms in the topology\n", .{sel_str}) catch
+        "error: selection matched no atoms in the topology\n";
+    printStderr(msg);
+    return error.EmptySelection;
+}
+
 /// Resolve the --select string to a slice of atom indices, or null (all atoms).
 /// Caller owns the returned slice.
 pub fn resolveSelection(
@@ -20,18 +34,18 @@ pub fn resolveSelection(
     const s = sel_str orelse return null;
 
     if (std.mem.eql(u8, s, "backbone")) {
-        return try select.byKeyword(allocator, topology, .backbone);
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .backbone), s);
     } else if (std.mem.eql(u8, s, "protein")) {
-        return try select.byKeyword(allocator, topology, .protein);
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .protein), s);
     } else if (std.mem.eql(u8, s, "water")) {
-        return try select.byKeyword(allocator, topology, .water);
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .water), s);
     } else if (std.mem.startsWith(u8, s, "name ")) {
-        return try select.byName(allocator, topology, s[5..]);
+        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s[5..]), s);
     } else if (std.mem.startsWith(u8, s, "index ")) {
-        return try select.byIndex(allocator, s[6..]);
+        return try requireNonEmptySelection(allocator, try select.byIndex(allocator, s[6..]), s);
     } else {
         // Treat as atom name shortcut ("CA", "N", ...).
-        return try select.byName(allocator, topology, s);
+        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s), s);
     }
 }
 
@@ -100,16 +114,43 @@ pub fn parseQuartets(allocator: std.mem.Allocator, spec: []const u8) ![][4]u32 {
 }
 
 /// Validate that all atom indices in a tuple array are within bounds.
-pub fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) void {
+pub fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) error{IndexOutOfRange}!void {
     for (tuples, 0..) |tuple, ti| {
         for (tuple) |idx| {
             if (idx >= n_atoms) {
-                std.debug.print(
-                    "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n",
-                    .{ idx, ti, n_atoms },
-                );
-                std.process.exit(1);
+                var buf: [128]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n", .{ idx, ti, n_atoms }) catch
+                    "error: atom index out of range\n";
+                printStderr(msg);
+                return error.IndexOutOfRange;
             }
         }
     }
+}
+
+test "resolveSelection rejects empty matches" {
+    const allocator = std.testing.allocator;
+    var topo = try types.Topology.init(allocator, .{
+        .n_atoms = 2,
+        .n_residues = 1,
+        .n_chains = 1,
+        .n_bonds = 0,
+    });
+    defer topo.deinit();
+
+    topo.atoms[0] = .{ .name = types.FixedString(4).fromSlice("N"), .element = .N, .residue_index = 0 };
+    topo.atoms[1] = .{ .name = types.FixedString(4).fromSlice("CA"), .element = .C, .residue_index = 0 };
+    topo.residues[0] = .{
+        .name = types.FixedString(5).fromSlice("ALA"),
+        .chain_index = 0,
+        .atom_range = .{ .start = 0, .len = 2 },
+        .resid = 1,
+    };
+    topo.chains[0] = .{
+        .name = types.FixedString(4).fromSlice("A"),
+        .residue_range = .{ .start = 0, .len = 1 },
+    };
+
+    try std.testing.expectError(error.EmptySelection, resolveSelection(allocator, topo, "ZZ"));
+    try std.testing.expectError(error.EmptySelection, resolveSelection(allocator, topo, "index "));
 }

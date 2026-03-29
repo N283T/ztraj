@@ -72,11 +72,9 @@ class TestRMSD:
 
 class TestRMSF:
     def test_vs_mdtraj(self, structure, frames):
-        ref = load_ref("rmsf_ca")
         # No superposition in ztraj → loose tolerance
         rmsf = pyztraj.compute_rmsf(frames)
         # Compare CA atoms only — ref has CA indices
-        ref_vals = np.asarray(ref["values"])
         # RMSF for all atoms, ref is CA only — can't directly compare without selection
         # Just check shapes are compatible and values are positive
         assert rmsf.shape[0] == structure.n_atoms
@@ -142,11 +140,11 @@ class TestCenterOfMass:
 class TestDSSP:
     def test_vs_mdtraj(self, structure):
         ref = load_ref("dssp")
-        ref_ss = ref["ss"]
-        # Use pyztraj's DSSP — need to call via CLI or C API
-        # For now, just verify the structure loads correctly
-        # (full DSSP comparison requires CLI or C API binding)
-        assert len(ref_ss) > 0
+        dssp = "".join(pyztraj.compute_dssp(structure, structure.coords).tolist())
+        assert len(dssp) == len(ref["ss"])
+        # Native ztraj DSSP distinguishes PP-II helices as "P", while the
+        # mdtraj reference represents those residues as loop.
+        assert dssp.replace("P", " ") == ref["ss"]
 
 
 class TestSASA:
@@ -161,13 +159,17 @@ class TestSASA:
 class TestPhiPsi:
     def test_phi_vs_mdtraj(self, structure):
         ref = load_ref("phi_psi")
+        phi = pyztraj.compute_phi(structure, structure.coords)
+        phi_defined = phi[~np.isnan(phi)]
         ref_phi = np.asarray(ref["phi"])
-        # Use pyztraj geometry module directly
-        from pyztraj.geometry import compute_distances  # verify import works
+        np.testing.assert_allclose(phi_defined, ref_phi, atol=1e-4)
 
-        # TODO: add compute_phi/psi to Python API
-        # For now, validate that reference exists and has correct shape
-        assert len(ref_phi) == 37
+    def test_psi_vs_mdtraj(self, structure):
+        ref = load_ref("phi_psi")
+        psi = pyztraj.compute_psi(structure, structure.coords)
+        psi_defined = psi[~np.isnan(psi)]
+        ref_psi = np.asarray(ref["psi"])
+        np.testing.assert_allclose(psi_defined, ref_psi, atol=1e-4)
 
 
 class TestPBCDistances:

@@ -39,6 +39,9 @@ packages = ["pyztraj"]
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
 
+[tool.hatch.build.targets.sdist]
+force-include = { "../build.zig" = "build.zig", "../build.zig.zon" = "build.zig.zon", "../src" = "src" }
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

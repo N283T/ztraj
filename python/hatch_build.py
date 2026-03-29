@@ -21,9 +21,9 @@ class ZigBuildHook(BuildHookInterface):
         """Build the Zig library and CLI binary, then copy them to the package directory."""
         build_data["infer_tag"] = True
 
-        root_dir = Path(self.root).parent  # Go up from python/ to project root
         python_dir = Path(self.root)
-        package_dir = python_dir / "pyztraj"
+        root_dir = self._project_root(python_dir)
+        package_dir = python_dir.joinpath("pyztraj")
 
         # Platform-specific names
         if sys.platform == "darwin":
@@ -37,14 +37,14 @@ class ZigBuildHook(BuildHookInterface):
 
         # Source paths (zig-out/)
         if sys.platform == "win32":
-            lib_src = root_dir / "zig-out" / "bin" / lib_name
+            lib_src = root_dir.joinpath("zig-out", "bin", lib_name)
         else:
-            lib_src = root_dir / "zig-out" / "lib" / lib_name
-        exe_src = root_dir / "zig-out" / "bin" / exe_name
+            lib_src = root_dir.joinpath("zig-out", "lib", lib_name)
+        exe_src = root_dir.joinpath("zig-out", "bin", exe_name)
 
         # Destination paths (pyztraj/)
-        lib_dst = package_dir / lib_name
-        exe_dst = package_dir / exe_name
+        lib_dst = package_dir.joinpath(lib_name)
+        exe_dst = package_dir.joinpath(exe_name)
 
         # Build if needed
         needs_build = self._needs_build(lib_src, lib_dst) or self._needs_build(exe_src, exe_dst)
@@ -62,6 +62,16 @@ class ZigBuildHook(BuildHookInterface):
         # Include both artifacts in the wheel
         build_data["force_include"][str(lib_dst)] = f"pyztraj/{lib_name}"
         build_data["force_include"][str(exe_dst)] = f"pyztraj/{exe_name}"
+
+    def _project_root(self, python_dir: Path) -> Path:
+        """Locate the Zig project root for both checkout and sdist layouts."""
+        if python_dir.joinpath("build.zig").exists():
+            return python_dir
+        parent = python_dir.parent
+        if parent.joinpath("build.zig").exists():
+            return parent
+        msg = f"Could not locate build.zig under {python_dir} or its parent"
+        raise FileNotFoundError(msg)
 
     def _needs_build(self, src: Path, dst: Path) -> bool:
         """Check if a build is needed based on file existence and timestamps."""
