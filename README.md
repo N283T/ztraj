@@ -59,7 +59,7 @@ ztraj rg traj.xtc --top structure.pdb --format csv --output rg.csv
 
 ### Available commands
 
-`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`, `summary`, `convert`
+`rmsd`, `rmsf`, `distances`, `angles`, `dihedrals`, `rg`, `center`, `inertia`, `hbonds`, `contacts`, `rdf`, `sasa`, `all`, `dssp`, `phi`, `psi`, `omega`, `chi`, `summary`, `convert`
 
 ## Python bindings (pyztraj)
 
@@ -108,11 +108,11 @@ r, g_r = pyztraj.compute_rdf(sel1_coords, sel2_coords, box_volume=1000.0)
 
 | Category | Functions |
 |----------|-----------|
-| I/O | `load_pdb`, `open_xtc` |
-| Geometry | `compute_distances`, `compute_angles`, `compute_dihedrals` |
-| Structure | `compute_rmsd`, `compute_rmsf`, `compute_rg` |
-| Properties | `compute_center_of_mass`, `compute_center_of_geometry`, `compute_inertia`, `compute_principal_moments` |
-| Analysis | `detect_hbonds`, `compute_contacts`, `compute_rdf` |
+| I/O | `load_pdb`, `load_gro`, `load_mmcif`, `open_xtc`, `open_trr`, `open_dcd`, `write_pdb`, `write_gro` |
+| Geometry | `compute_distances`, `compute_angles`, `compute_dihedrals`, `compute_phi`, `compute_psi`, `compute_omega`, `compute_chi` |
+| Structure | `compute_rmsd`, `compute_rmsf`, `compute_rg`, `compute_msd` |
+| Properties | `compute_center_of_mass`, `compute_center_of_geometry`, `compute_inertia`, `compute_principal_moments`, `minimum_image_distance`, `wrap_coords`, `make_molecules_whole` |
+| Analysis | `detect_hbonds`, `compute_contacts`, `compute_rdf`, `compute_sasa`, `compute_dssp`, `compute_native_contacts_q`, `compute_pca`, `analyze_all` |
 
 ## Supported formats
 

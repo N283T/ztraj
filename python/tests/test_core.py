@@ -1,6 +1,7 @@
 """Tests for pyztraj core API."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -145,6 +146,27 @@ class TestInertia:
         np.testing.assert_allclose(moments, [1.0, 2.0, 3.0], atol=1e-10)
 
 
+class TestMassValidation:
+    @pytest.mark.parametrize(
+        ("fn", "coords"),
+        [
+            (pyztraj.compute_rg, np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)),
+            (
+                pyztraj.compute_center_of_mass,
+                np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], dtype=np.float32),
+            ),
+            (
+                pyztraj.compute_inertia,
+                np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float32),
+            ),
+        ],
+    )
+    def test_short_masses_raise(self, fn, coords):
+        masses = np.array([1.0], dtype=np.float64)
+        with pytest.raises(ValueError, match="masses must have shape"):
+            fn(coords, masses)
+
+
 class TestRMSF:
     def test_static_structure(self):
         # All frames identical -> RMSF should be 0
@@ -197,6 +219,24 @@ class TestLoadPDB:
             pyztraj.load_pdb("/nonexistent/path.pdb")
 
 
+class TestStructureValidation:
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            pyztraj.compute_phi,
+            pyztraj.compute_psi,
+            pyztraj.compute_omega,
+            pyztraj.compute_chi,
+            pyztraj.compute_dssp,
+        ],
+    )
+    def test_truncated_coords_raise(self, pdb_path: Path, fn):
+        struct = pyztraj.load_pdb(pdb_path)
+        coords = struct.coords[:-1]
+        with pytest.raises(ValueError, match="coords has .* atoms but structure has"):
+            fn(struct, coords)
+
+
 class TestXtcReader:
     def test_read_frames(self, pdb_path: Path, xtc_path: Path):
         struct = pyztraj.load_pdb(pdb_path)
@@ -210,9 +250,8 @@ class TestXtcReader:
         assert frame_count == 5
 
     def test_atom_count_mismatch(self, xtc_path: Path):
-        with pytest.raises(ValueError, match="atoms"):
-            with pyztraj.open_xtc(xtc_path, 999) as _reader:
-                pass
+        with pytest.raises(ValueError, match="atoms"), pyztraj.open_xtc(xtc_path, 999):
+            pass
 
 
 class TestRDF:
@@ -275,6 +314,59 @@ class TestContacts:
         struct = pyztraj.load_pdb(pdb_path)
         with pytest.raises(ValueError, match="Unknown scheme"):
             pyztraj.compute_contacts(struct, struct.coords, scheme="invalid")
+
+    def test_realloc_path_returns_all_contacts(self, monkeypatch):
+        from pyztraj import analysis as analysis_mod
+
+        coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)
+        struct = SimpleNamespace(
+            n_atoms=2,
+            resids=np.array([1, 1], dtype=np.int32),
+            _path="dummy.pdb",
+            _loader="ztraj_load_pdb",
+        )
+
+        class FakeLib:
+            def __init__(self):
+                self.calls = 0
+
+            def ztraj_compute_contacts(
+                self,
+                handle,
+                x,
+                y,
+                z,
+                n_atoms,
+                scheme,
+                cutoff,
+                contacts_out,
+                capacity,
+                n_found,
+                n_threads,
+            ):
+                self.calls += 1
+                n_found[0] = 3
+                limit = capacity if self.calls == 1 else 3
+                for i in range(limit):
+                    contacts_out[i].residue_i = i
+                    contacts_out[i].residue_j = i + 1
+                    contacts_out[i].distance = float(i + 0.5)
+                return 0
+
+            def ztraj_free_structure(self, handle):
+                return None
+
+        fake_lib = FakeLib()
+
+        monkeypatch.setattr(analysis_mod, "get_lib", lambda: fake_lib)
+        monkeypatch.setattr(analysis_mod, "_load_topology_handle", lambda *args, **kwargs: object())
+
+        contacts = analysis_mod.compute_contacts(struct, coords)
+
+        assert fake_lib.calls == 2
+        assert len(contacts) == 3
+        assert [c.residue_i for c in contacts] == [0, 1, 2]
+        assert [c.residue_j for c in contacts] == [1, 2, 3]
 
 
 class TestAnalyzeAll:

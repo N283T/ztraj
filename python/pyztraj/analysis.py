@@ -24,6 +24,20 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
+def _validate_structure_coords(
+    structure: Structure,
+    coords: NDArray[np.float32],
+    label: str,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
+    """Validate that coords match the structure atom count."""
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+    if n_atoms != structure.n_atoms:
+        msg = f"{label}: coords has {n_atoms} atoms but structure has {structure.n_atoms}"
+        raise ValueError(msg)
+    return x, y, z, n_atoms
+
+
 def compute_rdf(
     sel1_coords: NDArray[np.float32],
     sel2_coords: NDArray[np.float32],
@@ -110,12 +124,7 @@ def detect_hbonds(
     """
     ffi = get_ffi()
     lib = get_lib()
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
-
-    if n_atoms != structure.n_atoms:
-        msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
-        raise ValueError(msg)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "detect_hbonds")
 
     handle = _load_topology_handle(structure, lib, ffi, "detect_hbonds/load_pdb")
 
@@ -205,12 +214,7 @@ def compute_contacts(
     """
     ffi = get_ffi()
     lib = get_lib()
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
-
-    if n_atoms != structure.n_atoms:
-        msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
-        raise ValueError(msg)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "compute_contacts")
 
     scheme_map = {"closest": 0, "ca": 1, "closest_heavy": 2}
     scheme_int = scheme_map.get(scheme)
@@ -222,8 +226,8 @@ def compute_contacts(
 
     try:
         n_residues = len(set(structure.resids.tolist()))
-        capacity = n_residues * n_residues // 2
-        contacts_buf = ffi.new(f"CContact[{max(capacity, 1)}]")
+        capacity = max(n_residues * n_residues // 2, 1)
+        contacts_buf = ffi.new(f"CContact[{capacity}]")
         n_found = ffi.new("size_t*")
 
         _check(
@@ -246,7 +250,8 @@ def compute_contacts(
         actual = int(n_found[0])
 
         if actual > capacity:
-            contacts_buf = ffi.new(f"CContact[{actual}]")
+            capacity = actual
+            contacts_buf = ffi.new(f"CContact[{capacity}]")
             _check(
                 lib.ztraj_compute_contacts(
                     handle,
@@ -271,7 +276,7 @@ def compute_contacts(
                 residue_j=int(contacts_buf[i].residue_j),
                 distance=float(contacts_buf[i].distance),
             )
-            for i in range(min(actual, capacity if actual > capacity else actual))
+            for i in range(actual)
         ]
     finally:
         lib.ztraj_free_structure(handle)
@@ -326,12 +331,7 @@ def compute_sasa(
 
     ffi = get_ffi()
     lib = get_lib()
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
-
-    if n_atoms != structure.n_atoms:
-        msg = f"coords has {n_atoms} atoms but structure has {structure.n_atoms}"
-        raise ValueError(msg)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "compute_sasa")
 
     handle = _load_topology_handle(structure, lib, ffi, "compute_sasa/load_pdb")
 
@@ -521,9 +521,7 @@ def compute_dssp(
     """
     ffi = get_ffi()
     lib = get_lib()
-
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "compute_dssp")
 
     handle = _load_topology_handle(structure, lib, ffi, "compute_dssp")
 

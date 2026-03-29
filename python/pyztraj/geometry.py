@@ -24,6 +24,29 @@ if TYPE_CHECKING:
     from pyztraj.io import Structure
 
 
+def _validate_masses(masses: NDArray[np.float64], n_atoms: int) -> NDArray[np.float64]:
+    """Normalize and validate a 1D mass array."""
+    masses = np.ascontiguousarray(masses, dtype=np.float64)
+    if masses.ndim != 1 or masses.shape[0] != n_atoms:
+        msg = f"masses must have shape ({n_atoms},), got {masses.shape}"
+        raise ValueError(msg)
+    return masses
+
+
+def _validate_structure_coords(
+    structure: Structure,
+    coords: NDArray[np.float32],
+    label: str,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
+    """Validate that coords match the structure atom count."""
+    x, y, z = _to_soa(coords)
+    n_atoms = len(x)
+    if n_atoms != structure.n_atoms:
+        msg = f"{label}: coords has {n_atoms} atoms but structure has {structure.n_atoms}"
+        raise ValueError(msg)
+    return x, y, z, n_atoms
+
+
 def compute_distances(
     coords: NDArray[np.float32],
     pairs: NDArray[np.uint32],
@@ -185,8 +208,8 @@ def compute_rg(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -229,8 +252,8 @@ def compute_center_of_mass(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -321,8 +344,8 @@ def compute_inertia(
     """
     ffi = get_ffi()
     x, y, z = _to_soa(coords)
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
     n_atoms = len(x)
+    masses = _validate_masses(masses, n_atoms)
 
     if atom_indices is not None:
         atom_indices = _as_u32(atom_indices)
@@ -596,8 +619,7 @@ def _compute_dihedral(
     ffi = get_ffi()
     lib = get_lib()
 
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, label)
 
     handle = _load_topology_handle(structure, lib, ffi, label)
 
@@ -668,8 +690,7 @@ def compute_chi(
     ffi = get_ffi()
     lib = get_lib()
 
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
+    x, y, z, n_atoms = _validate_structure_coords(structure, coords, "compute_chi")
 
     handle = _load_topology_handle(structure, lib, ffi, "compute_chi")
 

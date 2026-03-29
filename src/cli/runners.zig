@@ -1239,6 +1239,10 @@ fn runProteinDihedral(
 
     // Compute for each frame
     const analysis_node = progress_root.start("Computing " ++ key, frames.len);
+    defer {
+        analysis_node.end();
+        progress_root.end();
+    }
     switch (args.format) {
         .json => {
             try w.writeAll("{\n  \"" ++ key ++ "\": [\n");
@@ -1283,8 +1287,6 @@ fn runProteinDihedral(
             }
         },
     }
-    analysis_node.end();
-    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -1321,6 +1323,10 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
 
     // Output chi1-chi4 for each frame
     const analysis_node = progress_root.start("Computing chi", frames.len);
+    defer {
+        analysis_node.end();
+        progress_root.end();
+    }
     switch (args.format) {
         .json => {
             try w.writeAll("{\n");
@@ -1330,7 +1336,7 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
                 if (ci > 0) try w.writeAll(",\n");
                 try w.print("  \"{s}\": [\n", .{chi_name});
                 for (frames, 0..) |frame, fi| {
-                    const vals = prot_dih.computeChi(allocator, parsed.topology, frame, level) catch break;
+                    const vals = try prot_dih.computeChi(allocator, parsed.topology, frame, level);
                     defer allocator.free(vals);
                     if (fi > 0) try w.writeAll(",\n");
                     try w.writeAll("    [");
@@ -1358,7 +1364,7 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
             }
             try w.writeByte('\n');
             for (frames, 0..) |frame, fi| {
-                const vals = prot_dih.computeChi(allocator, parsed.topology, frame, 1) catch break;
+                const vals = try prot_dih.computeChi(allocator, parsed.topology, frame, 1);
                 defer allocator.free(vals);
                 try w.print("{d}", .{fi});
                 for (vals) |v| {
@@ -1372,8 +1378,6 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
             }
         },
     }
-    analysis_node.end();
-    progress_root.end();
     try flushOutput(buf.items, args.output_path);
 }
 
@@ -1480,16 +1484,12 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
     // -- Trajectory info (if separate trajectory file) ----------------------
     const has_traj = args.top_path != null;
     if (has_traj) {
-        const frames = try loader.loadAllFrames(allocator, args.traj_path, topo.atoms.len, std.Progress.Node.none);
-        defer {
-            for (frames) |*f| @constCast(f).deinit();
-            allocator.free(frames);
-        }
+        const traj_info = try loader.loadTrajectoryInfo(allocator, args.traj_path, topo.atoms.len);
         try w.print("\nTrajectory: {s}\n", .{args.traj_path});
-        try w.print("Frames:     {d}\n", .{frames.len});
-        if (frames.len > 0) {
-            const first_time = frames[0].time;
-            const last_time = frames[frames.len - 1].time;
+        try w.print("Frames:     {d}\n", .{traj_info.n_frames});
+        if (traj_info.first_time != null and traj_info.last_time != null) {
+            const first_time = traj_info.first_time.?;
+            const last_time = traj_info.last_time.?;
             if (first_time != 0.0 or last_time != 0.0) {
                 try w.print("Time:       {d:.3} .. {d:.3} ps\n", .{ first_time, last_time });
             }

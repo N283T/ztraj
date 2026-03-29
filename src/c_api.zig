@@ -55,7 +55,7 @@ pub const ZTRAJ_ERROR_EOF: c_int = -5;
 // Version
 // =============================================================================
 
-const VERSION: [*:0]const u8 = "0.4.1";
+const VERSION: [*:0]const u8 = "0.5.1";
 
 /// Get the library version string.
 export fn ztraj_version() callconv(.c) [*:0]const u8 {
@@ -1522,6 +1522,7 @@ export fn ztraj_compute_phi(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     n_residues_out.* = topo.residues.len;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
@@ -1551,6 +1552,7 @@ export fn ztraj_compute_psi(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     n_residues_out.* = topo.residues.len;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
@@ -1580,6 +1582,7 @@ export fn ztraj_compute_omega(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     n_residues_out.* = topo.residues.len;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
@@ -1610,6 +1613,7 @@ export fn ztraj_compute_chi(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     n_residues_out.* = topo.residues.len;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
@@ -1649,6 +1653,7 @@ export fn ztraj_compute_dssp(
 ) callconv(.c) c_int {
     const h = castStructureHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     const topo = h.parse_result.topology;
+    if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     n_residues_out.* = topo.residues.len;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
