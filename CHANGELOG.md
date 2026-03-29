@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0] - 2026-03-29
+
+### Added
+- #78 Interactive marimo notebook for trajectory analysis
+- #88 CLAUDE.md with project conventions and build instructions
+
+### Fixed
+- #79 Infer D-H bonds when topology lacks bond records
+- #85 Address review findings across CLI, FFI, packaging, and CI
+  - Extract duplicate validation helpers to shared module
+  - Replace `std.process.exit(1)` with proper error returns
+  - Add `n_atoms` validation to C API dihedral/DSSP exports
+  - Fix contacts reallocation path
+  - Add Windows CI support
+  - Tighten publish workflow tag pattern
+- #87 Handle DSSP compute errors individually instead of catch-all
+
 ## [0.5.1] - 2026-03-26
 
 ### Added
