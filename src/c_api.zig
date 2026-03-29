@@ -1658,10 +1658,16 @@ export fn ztraj_compute_dssp(
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
-    var dssp_result = dssp_mod.compute(c_allocator, topo, frame, .{ .n_threads = @as(usize, n_threads) }) catch {
-        // Fill with spaces (loop) for residues that couldn't be assigned
-        @memset(result[0..topo.residues.len], ' ');
-        return ZTRAJ_OK;
+    var dssp_result = dssp_mod.compute(c_allocator, topo, frame, .{ .n_threads = @as(usize, n_threads) }) catch |err| {
+        return switch (err) {
+            error.NoCompleteResidues => {
+                // No complete backbone residues — fill with loop and report success.
+                @memset(result[0..topo.residues.len], ' ');
+                return ZTRAJ_OK;
+            },
+            error.TopologyFrameMismatch => ZTRAJ_ERROR_INVALID_INPUT,
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+        };
     };
     defer dssp_result.deinit();
 
