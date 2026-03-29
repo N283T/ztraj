@@ -304,12 +304,19 @@ pub fn detect(
     const n_atoms = topology.atoms.len;
     if (n_atoms == 0) return result.toOwnedSlice(allocator);
 
-    // If topology has no bonds, infer D-H pairs from coordinates.
+    // If topology has no bonds (e.g. PDB without CONECT records), infer
+    // D-H covalent bonds from coordinates using a distance cutoff. This is
+    // a best-effort heuristic: each hydrogen is assigned to the closest N/O
+    // atom within dh_covalent_cutoff Å.
     const inferred_bonds = if (topology.bonds.len == 0)
         try inferDHBonds(allocator, topology, frame)
     else
         null;
     defer if (inferred_bonds) |b| allocator.free(b);
+
+    if (inferred_bonds) |b| {
+        std.log.debug("hbonds: topology has no bond records, inferred {d} D-H bonds from coordinates", .{b.len});
+    }
 
     const effective_topology = if (inferred_bonds) |b|
         types.Topology{
@@ -559,7 +566,9 @@ pub fn detectParallel(
     config: Config,
     n_threads: usize,
 ) ![]HBond {
-    // Fallback to single-threaded for small workloads.
+    // Fallback to single-threaded detect() for small workloads or when
+    // bond inference is needed (topology.bonds empty → detect() infers D-H
+    // bonds from coordinates).
     if (n_threads <= 1 or topology.bonds.len < 16) {
         return detect(allocator, topology, frame, config);
     }
