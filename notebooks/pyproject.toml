@@ -1,0 +1,17 @@
+[project]
+name = "ztraj-notebooks"
+version = "0.1.0"
+description = "Interactive MD trajectory analysis notebooks using pyztraj"
+requires-python = ">=3.12"
+dependencies = [
+    "marimo",
+    "pyztraj",
+    "altair",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "httptools",
+]
+
+[tool.uv.sources]
+pyztraj = { path = "../python" }

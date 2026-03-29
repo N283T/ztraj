@@ -9,7 +9,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from pyztraj._ffi import get_ffi, get_lib
-from pyztraj._helpers import ZtrajError, _check, _load_topology_handle, _ptr_f32, _ptr_f64, _ptr_i32
+from pyztraj._helpers import (
+    ZtrajError,
+    _check,
+    _load_topology_handle,
+    _ptr_f32,
+    _ptr_f64,
+    _ptr_i32,
+    _ptr_u32,
+)
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -72,7 +80,7 @@ class Structure:
                 return np.array([], dtype=np.uint32)
 
             result = np.empty(count, dtype=np.uint32)
-            ffi.memmove(result.ctypes.data, indices_ptr[0], count * 4)
+            ffi.memmove(_ptr_u32(result), indices_ptr[0], count * 4)
             lib.ztraj_free_selection(indices_ptr[0], count)
             return result
         finally:
