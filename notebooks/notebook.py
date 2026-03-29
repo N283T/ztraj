@@ -27,23 +27,78 @@ def header():
 
 
 @app.cell
-def load_data(mo):
-    from pathlib import Path
-
+def imports():
     import altair as alt
     import numpy as np
     import pandas as pd
     import pyztraj
 
-    _data_dir = Path("../validation/test_data")
-    pdb_path = _data_dir.joinpath("3tvj_I.pdb")
-    xtc_path = _data_dir.joinpath("3tvj_I_R1.xtc")
+    return alt, np, pd, pyztraj
 
-    structure = pyztraj.load_pdb(str(pdb_path))
+
+@app.cell
+def file_inputs(mo):
+    topology_path = mo.ui.text(
+        value="../validation/test_data/3tvj_I.pdb",
+        label="Topology file (PDB / GRO / mmCIF)",
+        full_width=True,
+    )
+    trajectory_path = mo.ui.text(
+        value="../validation/test_data/3tvj_I_R1.xtc",
+        label="Trajectory file (XTC / TRR / DCD)",
+        full_width=True,
+    )
+    mo.vstack([topology_path, trajectory_path])
+    return topology_path, trajectory_path
+
+
+@app.cell
+def load_data(mo, np, pyztraj, topology_path, trajectory_path):
+    from pathlib import Path
+
+    _topo = Path(topology_path.value)
+    _traj = Path(trajectory_path.value)
+
+    # Detect topology format
+    _loaders = {
+        ".pdb": pyztraj.load_pdb,
+        ".gro": pyztraj.load_gro,
+        ".cif": pyztraj.load_mmcif,
+        ".mmcif": pyztraj.load_mmcif,
+    }
+    _loader = _loaders.get(_topo.suffix.lower())
+    mo.stop(
+        _loader is None,
+        mo.md(f"Unsupported topology format: `{_topo.suffix}`").callout(kind="danger"),
+    )
+    mo.stop(
+        not _topo.exists(),
+        mo.md(f"Topology file not found: `{_topo}`").callout(kind="danger"),
+    )
+    mo.stop(
+        not _traj.exists(),
+        mo.md(f"Trajectory file not found: `{_traj}`").callout(kind="danger"),
+    )
+
+    structure = _loader(str(_topo))
+
+    # Detect trajectory format
+    _traj_openers = {
+        ".xtc": pyztraj.open_xtc,
+        ".trr": pyztraj.open_trr,
+        ".dcd": pyztraj.open_dcd,
+    }
+    _traj_opener = _traj_openers.get(_traj.suffix.lower())
+    mo.stop(
+        _traj_opener is None,
+        mo.md(f"Unsupported trajectory format: `{_traj.suffix}`").callout(
+            kind="danger"
+        ),
+    )
 
     frames = []
     times = []
-    with pyztraj.open_xtc(str(xtc_path), structure.n_atoms) as _reader:
+    with _traj_opener(str(_traj), structure.n_atoms) as _reader:
         for _frame in _reader:
             frames.append(_frame.coords.copy())
             times.append(_frame.time)
@@ -54,11 +109,11 @@ def load_data(mo):
     mo.md(
         f"""
         **Files loaded:**
-        - Topology: `{pdb_path.name}` ({structure.n_atoms} atoms)
-        - Trajectory: `{xtc_path.name}` ({n_frames} frames)
+        - Topology: `{_topo.name}` ({structure.n_atoms} atoms)
+        - Trajectory: `{_traj.name}` ({n_frames} frames)
         """
     ).callout(kind="success")
-    return alt, frames, n_frames, np, pd, pyztraj, structure, times
+    return frames, n_frames, structure, times
 
 
 @app.cell
@@ -277,20 +332,26 @@ def sasa_controls(mo, n_frames):
 @app.cell
 def sasa_per_residue(
     alt,
+    ca_idx,
     mo,
     np,
     pd,
     residue_labels,
     sasa_frame_slider,
     sasa_per_res_all,
+    structure,
 ):
     _fi = sasa_frame_slider.value
     _y_max = float(np.max(sasa_per_res_all))
+    _resids = [str(structure.resids[i]) for i in ca_idx]
+    _n_res = len(_resids)
+    _label_step = max(1, _n_res // 20)
     _df = pd.DataFrame(
         {
+            "Residue ID": _resids,
             "Residue": residue_labels,
             "SASA (Å²)": sasa_per_res_all[_fi],
-            "index": range(len(residue_labels)),
+            "index": range(_n_res),
         }
     )
     mo.ui.altair_chart(
@@ -298,7 +359,12 @@ def sasa_per_residue(
         .mark_bar(color="coral")
         .encode(
             x=alt.X(
-                "Residue:N", sort=alt.SortField("index"), axis=alt.Axis(labelAngle=-45)
+                "Residue ID:N",
+                sort=alt.SortField("index"),
+                title="Residue",
+                axis=alt.Axis(
+                    values=[_resids[i] for i in range(0, _n_res, _label_step)]
+                ),
             ),
             y=alt.Y("SASA (Å²):Q", scale=alt.Scale(domain=[0, _y_max])),
             tooltip=["Residue", alt.Tooltip("SASA (Å²)", format=".1f")],
@@ -336,7 +402,7 @@ def hbond_controls(mo):
         label="Angle cutoff (°)",
         show_value=True,
     )
-    mo.hstack([hbond_dist, hbond_angle])
+    mo.hstack([hbond_dist, hbond_angle], justify="start")
     return hbond_angle, hbond_dist
 
 
@@ -403,13 +469,14 @@ def contact_controls(mo):
         value="Closest heavy",
         label="Scheme",
     )
-    mo.hstack([contact_cutoff, contact_scheme])
+    mo.hstack([contact_cutoff, contact_scheme], justify="start")
     return contact_cutoff, contact_scheme
 
 
 @app.cell
 def contact_plot(
     alt,
+    ca_idx,
     contact_cutoff,
     contact_scheme,
     frames,
@@ -440,13 +507,18 @@ def contact_plot(
                 _freq[_j, _i] += 1
     _freq /= len(frames)
 
+    _resids = [str(structure.resids[i]) for i in ca_idx]
+    # Show every Nth label to avoid overlap
+    _label_step = max(1, n_residues // 20)
     _rows = []
     for _i in range(n_residues):
         for _j in range(n_residues):
             _rows.append(
                 {
-                    "Residue i": residue_labels[_i],
-                    "Residue j": residue_labels[_j],
+                    "Residue i": _resids[_i],
+                    "Name i": residue_labels[_i],
+                    "Residue j": _resids[_j],
+                    "Name j": residue_labels[_j],
                     "Frequency": round(_freq[_i, _j], 3),
                     "idx_i": _i,
                     "idx_j": _j,
@@ -454,18 +526,29 @@ def contact_plot(
             )
 
     _df = pd.DataFrame(_rows)
+    _axis_cfg = alt.Axis(values=[_resids[i] for i in range(0, n_residues, _label_step)])
     _chart = (
         alt.Chart(_df)
         .mark_rect()
         .encode(
-            x=alt.X("Residue i:N", sort=alt.SortField("idx_i")),
-            y=alt.Y("Residue j:N", sort=alt.SortField("idx_j")),
+            x=alt.X(
+                "Residue i:N",
+                sort=alt.SortField("idx_i"),
+                title="Residue",
+                axis=_axis_cfg,
+            ),
+            y=alt.Y(
+                "Residue j:N",
+                sort=alt.SortField("idx_j"),
+                title="Residue",
+                axis=_axis_cfg,
+            ),
             color=alt.Color(
                 "Frequency:Q",
                 scale=alt.Scale(scheme="reds", domain=[0, 1]),
                 legend=alt.Legend(title="Frequency"),
             ),
-            tooltip=["Residue i", "Residue j", alt.Tooltip("Frequency", format=".2f")],
+            tooltip=["Name i", "Name j", alt.Tooltip("Frequency", format=".2f")],
         )
         .properties(width=500, height=500, title="Contact Frequency Map")
     )
@@ -506,13 +589,17 @@ def contact_frame_controls(mo, n_frames):
         value="Closest heavy",
         label="Scheme",
     )
-    mo.hstack([contact_single_frame, contact_single_cutoff, contact_single_scheme])
+    mo.hstack(
+        [contact_single_frame, contact_single_cutoff, contact_single_scheme],
+        justify="start",
+    )
     return contact_single_cutoff, contact_single_frame, contact_single_scheme
 
 
 @app.cell(hide_code=True)
 def contact_frame_plot(
     alt,
+    ca_idx,
     contact_single_cutoff,
     contact_single_frame,
     contact_single_scheme,
@@ -531,6 +618,9 @@ def contact_frame_plot(
     _resid_to_idx = {
         rid: i for i, rid in enumerate(structure.resids[structure.select("name CA")])
     }
+    _resids = [str(structure.resids[i]) for i in ca_idx]
+    _n_res = len(_resids)
+    _label_step = max(1, _n_res // 20)
     _rows = []
     for _c in _contacts:
         _i = _resid_to_idx.get(_c.residue_i)
@@ -538,8 +628,10 @@ def contact_frame_plot(
         if _i is not None and _j is not None:
             _rows.append(
                 {
-                    "Residue i": residue_labels[_i],
-                    "Residue j": residue_labels[_j],
+                    "Residue i": _resids[_i],
+                    "Name i": residue_labels[_i],
+                    "Residue j": _resids[_j],
+                    "Name j": residue_labels[_j],
                     "Distance (Å)": round(_c.distance, 2),
                     "idx_i": _i,
                     "idx_j": _j,
@@ -547,8 +639,10 @@ def contact_frame_plot(
             )
             _rows.append(
                 {
-                    "Residue i": residue_labels[_j],
-                    "Residue j": residue_labels[_i],
+                    "Residue i": _resids[_j],
+                    "Name i": residue_labels[_j],
+                    "Residue j": _resids[_i],
+                    "Name j": residue_labels[_i],
                     "Distance (Å)": round(_c.distance, 2),
                     "idx_i": _j,
                     "idx_j": _i,
@@ -556,16 +650,27 @@ def contact_frame_plot(
             )
 
     _df = pd.DataFrame(_rows)
+    _axis_cfg = alt.Axis(values=[_resids[i] for i in range(0, _n_res, _label_step)])
     _chart = (
         alt.Chart(_df)
         .mark_rect()
         .encode(
-            x=alt.X("Residue i:N", sort=alt.SortField("idx_i")),
-            y=alt.Y("Residue j:N", sort=alt.SortField("idx_j")),
+            x=alt.X(
+                "Residue i:N",
+                sort=alt.SortField("idx_i"),
+                title="Residue",
+                axis=_axis_cfg,
+            ),
+            y=alt.Y(
+                "Residue j:N",
+                sort=alt.SortField("idx_j"),
+                title="Residue",
+                axis=_axis_cfg,
+            ),
             color=alt.Color(
                 "Distance (Å):Q", scale=alt.Scale(scheme="viridis", reverse=True)
             ),
-            tooltip=["Residue i", "Residue j", "Distance (Å)"],
+            tooltip=["Name i", "Name j", "Distance (Å)"],
         )
         .properties(
             width=500,
@@ -745,6 +850,7 @@ def dssp_controls(mo):
 @app.cell
 def dssp_plot(
     alt,
+    ca_idx,
     dssp_stride,
     frames,
     n_frames,
@@ -752,50 +858,101 @@ def dssp_plot(
     pyztraj,
     residue_labels,
     structure,
+    times,
 ):
     _stride_val = dssp_stride.value
     _frame_indices = list(range(0, n_frames, _stride_val))
     _n_res = len(residue_labels)
+    _resids = [str(structure.resids[i]) for i in ca_idx]
+    _res_label_step = max(1, _n_res // 20)
+    _time_labels = []
     _rows = []
     for _fi in _frame_indices:
+        _t_ns = round(float(times[_fi]) / 1000.0, 2)
+        _t_str = str(_t_ns)
+        _time_labels.append(_t_str)
         _assignments = pyztraj.compute_dssp(structure, frames[_fi])
         for _col, _code in enumerate(_assignments[:_n_res]):
             _rows.append(
                 {
-                    "Residue": residue_labels[_col],
-                    "Frame": _fi,
+                    "Residue": _resids[_col],
+                    "Residue name": residue_labels[_col],
+                    "Time (ns)": _t_str,
                     "SS": _code if _code.strip() else "C",
                     "res_idx": _col,
+                    "time_idx": len(_time_labels) - 1,
                 }
             )
 
     _df = pd.DataFrame(_rows)
-    _ss_order = ["H", "G", "I", "E", "B", "T", "S", "P", "C"]
-    _ss_colors = [
-        "#e41a1c",
-        "#ff7f00",
-        "#984ea3",
-        "#377eb8",
-        "#4daf4a",
-        "#a6d854",
-        "#ffff33",
-        "#f781bf",
-        "#999999",
+
+    # Full names for legend
+    _ss_code_to_name = {
+        "H": "α-helix",
+        "G": "3₁₀-helix",
+        "I": "π-helix",
+        "E": "β-sheet",
+        "B": "β-bridge",
+        "T": "Turn",
+        "S": "Bend",
+        "P": "PPII helix",
+        "C": "Coil",
+    }
+    _df["Secondary Structure"] = _df["SS"].map(_ss_code_to_name)
+
+    _ss_names = [
+        "α-helix",
+        "3₁₀-helix",
+        "π-helix",
+        "β-sheet",
+        "β-bridge",
+        "Turn",
+        "Bend",
+        "PPII helix",
+        "Coil",
     ]
+    _ss_colors = [
+        "#377eb8",
+        "#999999",
+        "#984ea3",
+        "#e41a1c",
+        "#000000",
+        "#ffff33",
+        "#4daf4a",
+        "#f781bf",
+        "white",
+    ]
+
+    _time_label_step = max(1, len(_time_labels) // 20)
+    _x_axis = alt.Axis(
+        values=[_time_labels[i] for i in range(0, len(_time_labels), _time_label_step)]
+    )
+    _y_axis = alt.Axis(values=[_resids[i] for i in range(0, _n_res, _res_label_step)])
+
     _chart = (
         alt.Chart(_df)
         .mark_rect()
         .encode(
-            x=alt.X("Residue:N", sort=alt.SortField("res_idx")),
-            y=alt.Y("Frame:O", sort="ascending"),
-            color=alt.Color(
-                "SS:N",
-                scale=alt.Scale(domain=_ss_order, range=_ss_colors),
-                legend=alt.Legend(title="SS"),
+            x=alt.X(
+                "Time (ns):N",
+                sort=alt.SortField("time_idx"),
+                title="Time (ns)",
+                axis=_x_axis,
             ),
-            tooltip=["Residue", "Frame", "SS"],
+            y=alt.Y(
+                "Residue:N",
+                sort=alt.SortField("res_idx"),
+                title="Residues",
+                axis=_y_axis,
+            ),
+            color=alt.Color(
+                "Secondary Structure:N",
+                scale=alt.Scale(domain=_ss_names, range=_ss_colors),
+                legend=alt.Legend(title="Secondary Structure"),
+            ),
+            tooltip=["Residue name", "Residue", "Time (ns)", "Secondary Structure"],
         )
-        .properties(width="container", height=400)
+        .properties(width="container", height=450)
     )
     _chart
     return
@@ -821,7 +978,7 @@ def dihedral_controls(mo, residue_labels):
         value="Phi (φ)",
         label="Dihedral type",
     )
-    mo.hstack([dihedral_res, dihedral_type])
+    mo.hstack([dihedral_res, dihedral_type], justify="start")
     return dihedral_res, dihedral_type
 
 
@@ -888,7 +1045,7 @@ def pca_compute(ca_idx, frames, pyztraj):
 
 
 @app.cell
-def pca_plot(alt, ca_idx, frames, mo, np, pca_result, pd):
+def pca_plot(alt, ca_idx, frames, np, pca_result, pd):
     _var = pca_result.variance_ratio
     _cum = np.cumsum(_var)
     _n = min(10, len(_var))
@@ -922,33 +1079,55 @@ def pca_plot(alt, ca_idx, frames, mo, np, pca_result, pd):
         )
     )
     _chart_var = (_bars + _line).properties(
-        width=400, height=350, title="Variance Explained"
+        width="container", height=350, title="Variance Explained"
     )
 
+    # Pre-compute projections for all components
     _mean = np.mean([f[ca_idx].flatten() for f in frames], axis=0)
-    _proj = np.array(
+    pca_projections = np.array(
         [(f[ca_idx].flatten() - _mean) @ pca_result.eigenvectors for f in frames]
     )
+    pca_n_components = _n
+
+    _chart_var
+    return pca_n_components, pca_projections
+
+
+@app.cell
+def pca_scatter_controls(mo, pca_n_components):
+    _options = {f"PC{i + 1}": i for i in range(pca_n_components)}
+    pca_x = mo.ui.dropdown(options=_options, value="PC1", label="X axis")
+    pca_y = mo.ui.dropdown(options=_options, value="PC2", label="Y axis")
+    mo.hstack([pca_x, pca_y], justify="start")
+    return pca_x, pca_y
+
+
+@app.cell
+def pca_scatter_plot(alt, frames, mo, np, pca_projections, pca_x, pca_y, pd):
+    _xi = pca_x.value
+    _yi = pca_y.value
     _df_pc = pd.DataFrame(
-        {"PC1": _proj[:, 0], "PC2": _proj[:, 1], "Frame": np.arange(len(frames))}
+        {
+            f"PC{_xi + 1}": pca_projections[:, _xi],
+            f"PC{_yi + 1}": pca_projections[:, _yi],
+            "Frame": np.arange(len(frames)),
+        }
     )
-    _chart_pc = (
+    mo.ui.altair_chart(
         alt.Chart(_df_pc)
         .mark_circle(size=20, opacity=0.7)
         .encode(
-            x="PC1:Q",
-            y="PC2:Q",
+            x=f"PC{_xi + 1}:Q",
+            y=f"PC{_yi + 1}:Q",
             color=alt.Color("Frame:Q", scale=alt.Scale(scheme="viridis")),
             tooltip=[
                 "Frame",
-                alt.Tooltip("PC1", format=".2f"),
-                alt.Tooltip("PC2", format=".2f"),
+                alt.Tooltip(f"PC{_xi + 1}", format=".2f"),
+                alt.Tooltip(f"PC{_yi + 1}", format=".2f"),
             ],
         )
-        .properties(width=450, height=350, title="PC1 vs PC2")
+        .properties(width="container", height=400, title=f"PC{_xi + 1} vs PC{_yi + 1}")
     )
-
-    mo.hstack([_chart_var, _chart_pc])
     return
 
 
@@ -1010,7 +1189,7 @@ def rdf_controls(mo):
         label="Bins",
         show_value=True,
     )
-    mo.hstack([rdf_r_max, rdf_n_bins])
+    mo.hstack([rdf_r_max, rdf_n_bins], justify="start")
     return rdf_n_bins, rdf_r_max
 
 
@@ -1162,7 +1341,7 @@ def distance_controls(mo, n_residues, residue_labels):
         value=residue_labels[min(10, n_residues - 1)],
         label="Residue j (CA)",
     )
-    mo.hstack([dist_res_i, dist_res_j])
+    mo.hstack([dist_res_i, dist_res_j], justify="start")
     return dist_res_i, dist_res_j
 
 
@@ -1268,10 +1447,13 @@ def summary_table(mo, np, pd, results):
 
 
 @app.cell
-def footer(mo, pyztraj):
-    mo.md(f"""
-    *pyztraj {pyztraj.get_version()} — 3TVJ chain I (38 residues, 531 atoms, 1000 frames)*
-    """)
+def footer(mo, n_frames, n_residues, pyztraj, structure, topology_path):
+    import pathlib as _pathlib
+
+    _name = _pathlib.Path(topology_path.value).stem
+    mo.md(
+        f"*pyztraj {pyztraj.get_version()} — {_name} ({n_residues} residues, {structure.n_atoms} atoms, {n_frames} frames)*"
+    )
     return
 
 
