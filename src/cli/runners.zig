@@ -171,7 +171,7 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    parsers.validateIndices(2, pairs, @intCast(parsed.topology.atoms.len));
+    try parsers.validateIndices(2, pairs, @intCast(parsed.topology.atoms.len));
 
     const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
@@ -251,7 +251,7 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    parsers.validateIndices(3, triplets, @intCast(parsed.topology.atoms.len));
+    try parsers.validateIndices(3, triplets, @intCast(parsed.topology.atoms.len));
 
     const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
@@ -330,7 +330,7 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
     var parsed = try loader.loadTopology(allocator, top_path);
     defer parsed.deinit();
 
-    parsers.validateIndices(4, quartets, @intCast(parsed.topology.atoms.len));
+    try parsers.validateIndices(4, quartets, @intCast(parsed.topology.atoms.len));
 
     const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {

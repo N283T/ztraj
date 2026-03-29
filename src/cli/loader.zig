@@ -60,11 +60,11 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
     } else if (isGro(path)) {
         return io.gro.parse(allocator, data);
     } else {
-        std.debug.print(
+        std.io.getStdErr().writer().print(
             "error: unsupported topology format for '{s}' (supported: .pdb, .cif, .mmcif, .gro)\n",
             .{path},
-        );
-        std.process.exit(1);
+        ) catch {};
+        return error.UnsupportedFormat;
     }
 }
 
@@ -82,10 +82,10 @@ pub const TrajectoryInfo = struct {
 fn ensureAtomCount(path: []const u8, expected: usize, actual: usize) !void {
     if (expected == actual) return;
 
-    std.debug.print(
+    std.io.getStdErr().writer().print(
         "error: '{s}' has {d} atoms but topology expects {d}\n",
         .{ path, actual, expected },
-    );
+    ) catch {};
     return error.InvalidAtomCount;
 }
 
@@ -149,11 +149,7 @@ pub fn loadTrajectoryInfo(
         else if (isGro(traj_path))
             try io.gro.parse(allocator, data)
         else {
-            std.debug.print(
-                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
-                .{traj_path},
-            );
-            std.process.exit(1);
+            return unsupportedTrajectoryFormat(traj_path);
         };
         defer pr.deinit();
         if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, pr.frame.nAtoms());
@@ -164,6 +160,14 @@ pub fn loadTrajectoryInfo(
             .last_time = pr.frame.time,
         };
     }
+}
+
+fn unsupportedTrajectoryFormat(path: []const u8) error{UnsupportedFormat} {
+    std.io.getStdErr().writer().print(
+        "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
+        .{path},
+    ) catch {};
+    return error.UnsupportedFormat;
 }
 
 /// Load every frame from a trajectory or single-structure file.
@@ -237,11 +241,7 @@ pub fn loadAllFrames(
         else if (isGro(traj_path))
             try io.gro.parse(allocator, data)
         else {
-            std.debug.print(
-                "error: unsupported trajectory/structure format for '{s}' (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n",
-                .{traj_path},
-            );
-            std.process.exit(1);
+            return unsupportedTrajectoryFormat(traj_path);
         };
         errdefer pr.frame.deinit();
         defer pr.topology.deinit();
@@ -305,5 +305,15 @@ test "loadAllFrames rejects mismatched structure atom count" {
     try std.testing.expectError(
         error.InvalidAtomCount,
         loadAllFrames(allocator, "test_data/1l2y.pdb", 1, std.Progress.Node.none),
+    );
+}
+
+test "loadTopology rejects unsupported format" {
+    const allocator = std.testing.allocator;
+    // Rename check: use an existing file but with unsupported extension
+    // The file will be read successfully but format detection should fail.
+    try std.testing.expectError(
+        error.UnsupportedFormat,
+        loadTopology(allocator, "build.zig"),
     );
 }

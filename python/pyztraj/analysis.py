@@ -17,25 +17,12 @@ from pyztraj._helpers import (
     _ptr_f64,
     _ptr_u32,
     _to_soa,
+    _validate_structure_coords,
 )
 from pyztraj.io import Structure
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-
-def _validate_structure_coords(
-    structure: Structure,
-    coords: NDArray[np.float32],
-    label: str,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
-    """Validate that coords match the structure atom count."""
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
-    if n_atoms != structure.n_atoms:
-        msg = f"{label}: coords has {n_atoms} atoms but structure has {structure.n_atoms}"
-        raise ValueError(msg)
-    return x, y, z, n_atoms
 
 
 def compute_rdf(
@@ -269,6 +256,9 @@ def compute_contacts(
                 "compute_contacts",
             )
             actual = int(n_found[0])
+            if actual > capacity:
+                msg = f"compute_contacts: realloc still insufficient ({actual} > {capacity})"
+                raise RuntimeError(msg)
 
         return [
             Contact(

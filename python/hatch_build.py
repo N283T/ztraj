@@ -23,7 +23,7 @@ class ZigBuildHook(BuildHookInterface):
 
         python_dir = Path(self.root)
         root_dir = self._project_root(python_dir)
-        package_dir = python_dir / "pyztraj"
+        package_dir = python_dir.joinpath("pyztraj")
 
         # Platform-specific names
         if sys.platform == "darwin":
@@ -37,14 +37,14 @@ class ZigBuildHook(BuildHookInterface):
 
         # Source paths (zig-out/)
         if sys.platform == "win32":
-            lib_src = root_dir / "zig-out" / "bin" / lib_name
+            lib_src = root_dir.joinpath("zig-out", "bin", lib_name)
         else:
-            lib_src = root_dir / "zig-out" / "lib" / lib_name
-        exe_src = root_dir / "zig-out" / "bin" / exe_name
+            lib_src = root_dir.joinpath("zig-out", "lib", lib_name)
+        exe_src = root_dir.joinpath("zig-out", "bin", exe_name)
 
         # Destination paths (pyztraj/)
-        lib_dst = package_dir / lib_name
-        exe_dst = package_dir / exe_name
+        lib_dst = package_dir.joinpath(lib_name)
+        exe_dst = package_dir.joinpath(exe_name)
 
         # Build if needed
         needs_build = self._needs_build(lib_src, lib_dst) or self._needs_build(exe_src, exe_dst)
@@ -65,10 +65,10 @@ class ZigBuildHook(BuildHookInterface):
 
     def _project_root(self, python_dir: Path) -> Path:
         """Locate the Zig project root for both checkout and sdist layouts."""
-        if (python_dir / "build.zig").exists():
+        if python_dir.joinpath("build.zig").exists():
             return python_dir
         parent = python_dir.parent
-        if (parent / "build.zig").exists():
+        if parent.joinpath("build.zig").exists():
             return parent
         msg = f"Could not locate build.zig under {python_dir} or its parent"
         raise FileNotFoundError(msg)

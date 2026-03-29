@@ -16,35 +16,14 @@ from pyztraj._helpers import (
     _ptr_f64,
     _ptr_u32,
     _to_soa,
+    _validate_masses,
+    _validate_structure_coords,
 )
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from pyztraj.io import Structure
-
-
-def _validate_masses(masses: NDArray[np.float64], n_atoms: int) -> NDArray[np.float64]:
-    """Normalize and validate a 1D mass array."""
-    masses = np.ascontiguousarray(masses, dtype=np.float64)
-    if masses.ndim != 1 or masses.shape[0] != n_atoms:
-        msg = f"masses must have shape ({n_atoms},), got {masses.shape}"
-        raise ValueError(msg)
-    return masses
-
-
-def _validate_structure_coords(
-    structure: Structure,
-    coords: NDArray[np.float32],
-    label: str,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int]:
-    """Validate that coords match the structure atom count."""
-    x, y, z = _to_soa(coords)
-    n_atoms = len(x)
-    if n_atoms != structure.n_atoms:
-        msg = f"{label}: coords has {n_atoms} atoms but structure has {structure.n_atoms}"
-        raise ValueError(msg)
-    return x, y, z, n_atoms
 
 
 def compute_distances(

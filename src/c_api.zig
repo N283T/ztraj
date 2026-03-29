@@ -2108,3 +2108,70 @@ test "c_api: principal_moments" {
     try std.testing.expectApproxEqAbs(@as(f64, 2.0), result[1], 1e-10);
     try std.testing.expectApproxEqAbs(@as(f64, 3.0), result[2], 1e-10);
 }
+
+fn loadTestHandle() !?*anyopaque {
+    var handle: ?*anyopaque = null;
+    const rc = ztraj_load_pdb("test_data/1l2y.pdb", &handle);
+    if (rc != ZTRAJ_OK) return error.LoadFailed;
+    return handle;
+}
+
+test "c_api: phi rejects mismatched n_atoms" {
+    const handle = try loadTestHandle();
+    defer ztraj_free_structure(handle);
+
+    var dummy_x = [_]f32{0.0};
+    var n_res: usize = 0;
+    var result: [1]f32 = undefined;
+
+    const rc = ztraj_compute_phi(handle, &dummy_x, &dummy_x, &dummy_x, 1, &result, &n_res);
+    try std.testing.expectEqual(ZTRAJ_ERROR_INVALID_INPUT, rc);
+}
+
+test "c_api: psi rejects mismatched n_atoms" {
+    const handle = try loadTestHandle();
+    defer ztraj_free_structure(handle);
+
+    var dummy_x = [_]f32{0.0};
+    var n_res: usize = 0;
+    var result: [1]f32 = undefined;
+
+    const rc = ztraj_compute_psi(handle, &dummy_x, &dummy_x, &dummy_x, 1, &result, &n_res);
+    try std.testing.expectEqual(ZTRAJ_ERROR_INVALID_INPUT, rc);
+}
+
+test "c_api: omega rejects mismatched n_atoms" {
+    const handle = try loadTestHandle();
+    defer ztraj_free_structure(handle);
+
+    var dummy_x = [_]f32{0.0};
+    var n_res: usize = 0;
+    var result: [1]f32 = undefined;
+
+    const rc = ztraj_compute_omega(handle, &dummy_x, &dummy_x, &dummy_x, 1, &result, &n_res);
+    try std.testing.expectEqual(ZTRAJ_ERROR_INVALID_INPUT, rc);
+}
+
+test "c_api: chi rejects mismatched n_atoms" {
+    const handle = try loadTestHandle();
+    defer ztraj_free_structure(handle);
+
+    var dummy_x = [_]f32{0.0};
+    var n_res: usize = 0;
+    var result: [1]f32 = undefined;
+
+    const rc = ztraj_compute_chi(handle, &dummy_x, &dummy_x, &dummy_x, 1, 1, &result, &n_res);
+    try std.testing.expectEqual(ZTRAJ_ERROR_INVALID_INPUT, rc);
+}
+
+test "c_api: dssp rejects mismatched n_atoms" {
+    const handle = try loadTestHandle();
+    defer ztraj_free_structure(handle);
+
+    var dummy_x = [_]f32{0.0};
+    var n_res: usize = 0;
+    var result: [1]u8 = undefined;
+
+    const rc = ztraj_compute_dssp(handle, &dummy_x, &dummy_x, &dummy_x, 1, &result, &n_res, 0);
+    try std.testing.expectEqual(ZTRAJ_ERROR_INVALID_INPUT, rc);
+}

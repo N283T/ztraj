@@ -166,6 +166,25 @@ class TestMassValidation:
         with pytest.raises(ValueError, match="masses must have shape"):
             fn(coords, masses)
 
+    @pytest.mark.parametrize(
+        ("fn", "coords"),
+        [
+            (pyztraj.compute_rg, np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32)),
+            (
+                pyztraj.compute_center_of_mass,
+                np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], dtype=np.float32),
+            ),
+            (
+                pyztraj.compute_inertia,
+                np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=np.float32),
+            ),
+        ],
+    )
+    def test_2d_masses_raise(self, fn, coords):
+        masses = np.ones((2, 2), dtype=np.float64)
+        with pytest.raises(ValueError, match="masses must have shape"):
+            fn(coords, masses)
+
 
 class TestRMSF:
     def test_static_structure(self):

@@ -10,9 +10,13 @@ const select = ztraj.select;
 // Atom selection helper
 // ============================================================================
 
-fn requireNonEmptySelection(allocator: std.mem.Allocator, selection: []u32) ![]u32 {
+fn requireNonEmptySelection(allocator: std.mem.Allocator, selection: []u32, sel_str: []const u8) ![]u32 {
     if (selection.len > 0) return selection;
     allocator.free(selection);
+    std.io.getStdErr().writer().print(
+        "error: selection '{s}' matched no atoms in the topology\n",
+        .{sel_str},
+    ) catch {};
     return error.EmptySelection;
 }
 
@@ -26,18 +30,18 @@ pub fn resolveSelection(
     const s = sel_str orelse return null;
 
     if (std.mem.eql(u8, s, "backbone")) {
-        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .backbone));
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .backbone), s);
     } else if (std.mem.eql(u8, s, "protein")) {
-        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .protein));
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .protein), s);
     } else if (std.mem.eql(u8, s, "water")) {
-        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .water));
+        return try requireNonEmptySelection(allocator, try select.byKeyword(allocator, topology, .water), s);
     } else if (std.mem.startsWith(u8, s, "name ")) {
-        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s[5..]));
+        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s[5..]), s);
     } else if (std.mem.startsWith(u8, s, "index ")) {
-        return try requireNonEmptySelection(allocator, try select.byIndex(allocator, s[6..]));
+        return try requireNonEmptySelection(allocator, try select.byIndex(allocator, s[6..]), s);
     } else {
         // Treat as atom name shortcut ("CA", "N", ...).
-        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s));
+        return try requireNonEmptySelection(allocator, try select.byName(allocator, topology, s), s);
     }
 }
 
@@ -106,15 +110,15 @@ pub fn parseQuartets(allocator: std.mem.Allocator, spec: []const u8) ![][4]u32 {
 }
 
 /// Validate that all atom indices in a tuple array are within bounds.
-pub fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) void {
+pub fn validateIndices(comptime N: usize, tuples: []const [N]u32, n_atoms: u32) error{IndexOutOfRange}!void {
     for (tuples, 0..) |tuple, ti| {
         for (tuple) |idx| {
             if (idx >= n_atoms) {
-                std.debug.print(
+                std.io.getStdErr().writer().print(
                     "error: atom index {d} in tuple {d} is out of range (topology has {d} atoms)\n",
                     .{ idx, ti, n_atoms },
-                );
-                std.process.exit(1);
+                ) catch {};
+                return error.IndexOutOfRange;
             }
         }
     }
