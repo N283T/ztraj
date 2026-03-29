@@ -222,11 +222,74 @@ pub const Config = struct {
 // Detection
 // ============================================================================
 
+/// Maximum covalent bond distance for D-H inference (Å).
+/// Typical N-H ~1.01 Å, O-H ~0.96 Å; 1.3 Å covers all cases with margin.
+const dh_covalent_cutoff: f32 = 1.3;
+
+/// Infer D-H covalent bonds from coordinates when topology has no bond records.
+/// Returns a list of Bond where one atom is H and the other is N or O,
+/// with distance ≤ dh_covalent_cutoff.
+fn inferDHBonds(
+    allocator: std.mem.Allocator,
+    topology: types.Topology,
+    frame: types.Frame,
+) ![]types.Bond {
+    const n_atoms = topology.atoms.len;
+    var bonds = std.ArrayList(types.Bond){};
+    errdefer bonds.deinit(allocator);
+
+    // Collect hydrogen indices and donor (N/O) indices.
+    var h_list = std.ArrayList(u32){};
+    defer h_list.deinit(allocator);
+    var donor_list = std.ArrayList(u32){};
+    defer donor_list.deinit(allocator);
+
+    for (0..n_atoms) |i| {
+        const idx: u32 = @intCast(i);
+        switch (topology.atoms[i].element) {
+            .H => try h_list.append(allocator, idx),
+            .N, .O => try donor_list.append(allocator, idx),
+            else => {},
+        }
+    }
+
+    const cutoff_sq = dh_covalent_cutoff * dh_covalent_cutoff;
+
+    for (h_list.items) |h_idx| {
+        const hx = frame.x[h_idx];
+        const hy = frame.y[h_idx];
+        const hz = frame.z[h_idx];
+
+        var best_dist_sq: f32 = cutoff_sq;
+        var best_donor: ?u32 = null;
+
+        for (donor_list.items) |d_idx| {
+            const dx = frame.x[d_idx] - hx;
+            const dy = frame.y[d_idx] - hy;
+            const dz = frame.z[d_idx] - hz;
+            const dist_sq = dx * dx + dy * dy + dz * dz;
+            if (dist_sq < best_dist_sq) {
+                best_dist_sq = dist_sq;
+                best_donor = d_idx;
+            }
+        }
+
+        if (best_donor) |d| {
+            try bonds.append(allocator, .{ .atom_i = h_idx, .atom_j = d });
+        }
+    }
+
+    return bonds.toOwnedSlice(allocator);
+}
+
 /// Detect hydrogen bonds in a single frame using the Baker-Hubbard criteria.
 ///
 /// Iterates over all covalent bonds in `topology` looking for D-H pairs where
 /// D is N or O, then tests every potential acceptor (N, O, S) against the
 /// distance and angle thresholds.
+///
+/// When the topology has no bond records (e.g. PDB without CONECT), D-H
+/// covalent bonds are inferred from coordinates using a distance cutoff.
 ///
 /// The returned slice is owned by the caller; free with `allocator.free()`.
 pub fn detect(
@@ -241,11 +304,36 @@ pub fn detect(
     const n_atoms = topology.atoms.len;
     if (n_atoms == 0) return result.toOwnedSlice(allocator);
 
+    // If topology has no bonds (e.g. PDB without CONECT records), infer
+    // D-H covalent bonds from coordinates using a distance cutoff. This is
+    // a best-effort heuristic: each hydrogen is assigned to the closest N/O
+    // atom within dh_covalent_cutoff Å.
+    const inferred_bonds = if (topology.bonds.len == 0)
+        try inferDHBonds(allocator, topology, frame)
+    else
+        null;
+    defer if (inferred_bonds) |b| allocator.free(b);
+
+    if (inferred_bonds) |b| {
+        std.log.debug("hbonds: topology has no bond records, inferred {d} D-H bonds from coordinates", .{b.len});
+    }
+
+    const effective_topology = if (inferred_bonds) |b|
+        types.Topology{
+            .atoms = topology.atoms,
+            .residues = topology.residues,
+            .chains = topology.chains,
+            .bonds = b,
+            .allocator = topology.allocator,
+        }
+    else
+        topology;
+
     // Build spatial cell list of acceptor atoms for O(1) neighbor lookup.
-    var cell_list = try buildAcceptorCellList(allocator, frame, topology, config.dist_cutoff);
+    var cell_list = try buildAcceptorCellList(allocator, frame, effective_topology, config.dist_cutoff);
     defer cell_list.deinit(allocator);
 
-    try detectWithCellList(allocator, topology, frame, config, &cell_list, &result);
+    try detectWithCellList(allocator, effective_topology, frame, config, &cell_list, &result);
 
     return result.toOwnedSlice(allocator);
 }
@@ -478,7 +566,9 @@ pub fn detectParallel(
     config: Config,
     n_threads: usize,
 ) ![]HBond {
-    // Fallback to single-threaded for small workloads.
+    // Fallback to single-threaded detect() for small workloads or when
+    // bond inference is needed (topology.bonds empty → detect() infers D-H
+    // bonds from coordinates).
     if (n_threads <= 1 or topology.bonds.len < 16) {
         return detect(allocator, topology, frame, config);
     }
