@@ -2089,6 +2089,94 @@ export fn ztraj_close_trr_writer(handle: ?*anyopaque) callconv(.c) c_int {
 }
 
 // =============================================================================
+// Trajectory Writer: AMBER NetCDF
+// =============================================================================
+
+const NC_WRITER_MAGIC: u64 = 0xCAFE_BABE_58C0_0004;
+
+const NcWriterHandle = struct {
+    magic: u64 = NC_WRITER_MAGIC,
+    writer: nc_mod.NcWriter,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *NcWriterHandle) void {
+        self.magic = 0;
+        self.writer.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+fn castNcWriterHandle(handle: ?*anyopaque) ?*NcWriterHandle {
+    const h: *NcWriterHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != NC_WRITER_MAGIC) return null;
+    return h;
+}
+
+/// Open an AMBER NetCDF trajectory file for writing.
+///
+/// `n_atoms` must match the number of atoms that will be written per frame.
+/// `has_cell` controls whether cell (box) information is included.
+/// The handle must be closed with `ztraj_close_nc_writer`.
+export fn ztraj_open_nc_writer(
+    path: [*:0]const u8,
+    n_atoms: u32,
+    has_cell: bool,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+    const path_slice = std.mem.sliceTo(path, 0);
+
+    var writer = nc_mod.NcWriter.open(c_allocator, path_slice, n_atoms, has_cell) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    errdefer writer.deinit();
+
+    const handle = c_allocator.create(NcWriterHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .writer = writer,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Write a single frame to an AMBER NetCDF trajectory.
+/// Coordinates must be in angstroms.
+export fn ztraj_write_nc_frame(
+    handle: ?*anyopaque,
+    x: [*]const f32,
+    y: [*]const f32,
+    z: [*]const f32,
+    n_atoms: usize,
+    time: f32,
+    step: i32,
+) callconv(.c) c_int {
+    const h = castNcWriterHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+    var frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
+    frame.time = time;
+    frame.step = step;
+    h.writer.writeFrame(frame) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    return ZTRAJ_OK;
+}
+
+/// Flush and close an AMBER NetCDF writer, freeing all resources.
+export fn ztraj_close_nc_writer(handle: ?*anyopaque) callconv(.c) c_int {
+    const h = castNcWriterHandle(handle) orelse return ZTRAJ_OK;
+    h.writer.close() catch {
+        h.deinit();
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    h.magic = 0;
+    h.allocator.destroy(h);
+    return ZTRAJ_OK;
+}
+
+// =============================================================================
 // Atom Selection
 // =============================================================================
 

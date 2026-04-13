@@ -481,6 +481,448 @@ fn skipNcName(file: std.fs.File) !void {
 }
 
 // ============================================================================
+// NcWriter — streaming AMBER NetCDF trajectory writer
+// ============================================================================
+
+pub const NcWriteError = error{
+    FileCreateFailed,
+    WriteError,
+    OutOfMemory,
+};
+
+/// Streaming AMBER NetCDF trajectory writer.
+///
+/// Usage:
+///
+///   var writer = try NcWriter.open(allocator, "output.nc", 100);
+///   defer writer.deinit();
+///   for (frames) |frame| try writer.writeFrame(frame);
+///   try writer.close();
+///
+/// Writes CDF-2 (64-bit offset) format with AMBER conventions.
+/// Coordinates must be in angstroms.
+pub const NcWriter = struct {
+    file: std.fs.File,
+    allocator: std.mem.Allocator,
+    n_atoms: u32,
+    frames_written: u32,
+    /// Reusable buffer for AOS coordinate encoding.
+    coord_buf: []u8,
+    /// Whether cell info (box vectors) should be written.
+    has_cell: bool,
+    /// File offset where the numrecs field lives (to update on close).
+    numrecs_offset: u64,
+    /// File offset where coordinate data begins.
+    data_offset: u64,
+    /// Per-record stride in bytes.
+    rec_size: u64,
+    closed: bool = false,
+
+    const Self = @This();
+
+    /// Create a new AMBER NetCDF trajectory file for writing.
+    pub fn open(allocator: std.mem.Allocator, path: []const u8, n_atoms: u32, has_cell: bool) !Self {
+        const file = std.fs.cwd().createFile(path, .{}) catch {
+            return NcWriteError.FileCreateFailed;
+        };
+        errdefer file.close();
+
+        const coord_bytes: usize = @as(usize, n_atoms) * 3 * 4;
+        const coord_buf = allocator.alloc(u8, coord_bytes) catch return NcWriteError.OutOfMemory;
+        errdefer allocator.free(coord_buf);
+
+        // Write header
+        const header_info = writeHeader(file, n_atoms, has_cell) catch return NcWriteError.WriteError;
+
+        return Self{
+            .file = file,
+            .allocator = allocator,
+            .n_atoms = n_atoms,
+            .frames_written = 0,
+            .coord_buf = coord_buf,
+            .has_cell = has_cell,
+            .numrecs_offset = header_info.numrecs_offset,
+            .data_offset = header_info.data_offset,
+            .rec_size = header_info.rec_size,
+        };
+    }
+
+    /// Write a single frame.
+    pub fn writeFrame(self: *Self, frame: types.Frame) !void {
+        const n: usize = self.n_atoms;
+        const fi: u64 = self.frames_written;
+        const file_offset = self.data_offset + fi * self.rec_size;
+
+        // Encode SOA native f32 → AOS big-endian float32
+        for (0..n) |ai| {
+            const base = ai * 12;
+            writeBEf32(self.coord_buf[base..][0..4], frame.x[ai]);
+            writeBEf32(self.coord_buf[base + 4 ..][0..4], frame.y[ai]);
+            writeBEf32(self.coord_buf[base + 8 ..][0..4], frame.z[ai]);
+        }
+
+        self.file.seekTo(file_offset) catch return NcWriteError.WriteError;
+        self.file.writeAll(self.coord_buf) catch return NcWriteError.WriteError;
+
+        // Pad coordinates to 4-byte boundary
+        const coord_bytes: u64 = @as(u64, n) * 12;
+        const coord_padded = (coord_bytes + 3) & ~@as(u64, 3);
+        if (coord_padded > coord_bytes) {
+            const zeros = [_]u8{ 0, 0, 0 };
+            const pad_len: usize = @intCast(coord_padded - coord_bytes);
+            self.file.writeAll(zeros[0..pad_len]) catch return NcWriteError.WriteError;
+        }
+
+        // Write cell data if present
+        if (self.has_cell) {
+            // cell_lengths: 3 x f64 (big-endian)
+            var lbuf: [24]u8 = undefined;
+            var abuf: [24]u8 = undefined;
+
+            if (frame.box_vectors) |box| {
+                // Extract lengths from box vectors (diagonal for orthogonal,
+                // vector norms for triclinic)
+                const a = @sqrt(@as(f64, box[0][0]) * box[0][0] + @as(f64, box[0][1]) * box[0][1] + @as(f64, box[0][2]) * box[0][2]);
+                const b = @sqrt(@as(f64, box[1][0]) * box[1][0] + @as(f64, box[1][1]) * box[1][1] + @as(f64, box[1][2]) * box[1][2]);
+                const c = @sqrt(@as(f64, box[2][0]) * box[2][0] + @as(f64, box[2][1]) * box[2][1] + @as(f64, box[2][2]) * box[2][2]);
+
+                writeBEf64(lbuf[0..8], a);
+                writeBEf64(lbuf[8..16], b);
+                writeBEf64(lbuf[16..24], c);
+
+                // Compute angles from box vectors
+                const rad2deg: f64 = 180.0 / std.math.pi;
+                const alpha = std.math.acos((@as(f64, box[1][0]) * box[2][0] + @as(f64, box[1][1]) * box[2][1] + @as(f64, box[1][2]) * box[2][2]) / (b * c)) * rad2deg;
+                const beta = std.math.acos((@as(f64, box[0][0]) * box[2][0] + @as(f64, box[0][1]) * box[2][1] + @as(f64, box[0][2]) * box[2][2]) / (a * c)) * rad2deg;
+                const gamma = std.math.acos((@as(f64, box[0][0]) * box[1][0] + @as(f64, box[0][1]) * box[1][1] + @as(f64, box[0][2]) * box[1][2]) / (a * b)) * rad2deg;
+
+                writeBEf64(abuf[0..8], alpha);
+                writeBEf64(abuf[8..16], beta);
+                writeBEf64(abuf[16..24], gamma);
+            } else {
+                // No box: write zeros
+                @memset(&lbuf, 0);
+                @memset(&abuf, 0);
+            }
+
+            self.file.writeAll(&lbuf) catch return NcWriteError.WriteError;
+            self.file.writeAll(&abuf) catch return NcWriteError.WriteError;
+        }
+
+        self.frames_written += 1;
+    }
+
+    /// Flush and close the file. Updates the frame count in the header.
+    pub fn close(self: *Self) !void {
+        defer {
+            self.allocator.free(self.coord_buf);
+            self.coord_buf = &.{};
+            self.file.close();
+            self.closed = true;
+        }
+        // Update numrecs (frame count) in the header
+        self.file.seekTo(self.numrecs_offset) catch return NcWriteError.WriteError;
+        var buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buf, self.frames_written, .big);
+        self.file.writeAll(&buf) catch return NcWriteError.WriteError;
+    }
+
+    /// Best-effort cleanup if close() was not called.
+    pub fn deinit(self: *Self) void {
+        if (!self.closed) {
+            self.close() catch {};
+        }
+    }
+};
+
+const HeaderInfo = struct {
+    numrecs_offset: u64,
+    data_offset: u64,
+    rec_size: u64,
+};
+
+/// Write a complete AMBER NetCDF-3 (CDF-2) header.
+fn writeHeader(file: std.fs.File, n_atoms: u32, has_cell: bool) !HeaderInfo {
+
+    // Magic: CDF version 2 (64-bit offset)
+    try file.writeAll("CDF\x02");
+
+    // numrecs (placeholder — updated on close)
+    const numrecs_offset: u64 = 4;
+    try fileWriteU32(file, 0);
+
+    // ---- Dimensions ----
+    const n_dims: u32 = if (has_cell) 6 else 3;
+    try fileWriteU32(file, NC_DIMENSION);
+    try fileWriteU32(file, n_dims);
+
+    // dim 0: frame (unlimited)
+    try fileWriteName(file, "frame");
+    try fileWriteU32(file, 0); // 0 = unlimited
+
+    // dim 1: spatial
+    try fileWriteName(file, "spatial");
+    try fileWriteU32(file, 3);
+
+    // dim 2: atom
+    try fileWriteName(file, "atom");
+    try fileWriteU32(file, n_atoms);
+
+    if (has_cell) {
+        // dim 3: cell_spatial
+        try fileWriteName(file, "cell_spatial");
+        try fileWriteU32(file, 3);
+
+        // dim 4: label
+        try fileWriteName(file, "label");
+        try fileWriteU32(file, 5);
+
+        // dim 5: cell_angular
+        try fileWriteName(file, "cell_angular");
+        try fileWriteU32(file, 3);
+    }
+
+    // ---- Global attributes ----
+    try fileWriteU32(file, NC_ATTRIBUTE);
+    try fileWriteU32(file, 2); // 2 attributes
+
+    // Conventions = "AMBER"
+    try fileWriteName(file, "Conventions");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 5);
+    try file.writeAll("AMBER\x00\x00\x00"); // padded to 8 bytes
+
+    // ConventionVersion = "1.0"
+    try fileWriteName(file, "ConventionVersion");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 3);
+    try file.writeAll("1.0\x00"); // padded to 4 bytes
+
+    // ---- Variables ----
+    const n_vars: u32 = if (has_cell) 5 else 2;
+    try fileWriteU32(file, NC_VARIABLE);
+    try fileWriteU32(file, n_vars);
+
+    // Compute per-record sizes
+    const coord_size: u64 = @as(u64, n_atoms) * 3 * 4;
+    const coord_padded = (coord_size + 3) & ~@as(u64, 3);
+    const spatial_size: u64 = 4; // 3 chars padded to 4
+    const cell_lengths_size: u64 = 24; // 3 x f64
+    const cell_angles_size: u64 = 24;
+
+    var rec_size: u64 = coord_padded;
+    if (has_cell) {
+        rec_size += cell_lengths_size + cell_angles_size;
+    }
+
+    // We need to compute the header size to determine data offsets.
+    // For simplicity, collect the variable definitions first, then write offsets.
+
+    // Variable 0: spatial (non-record, char, dim=[spatial])
+    // Variable 1: coordinates (record, float, dim=[frame, atom, spatial])
+    // Variable 2: cell_spatial (non-record, char, dim=[cell_spatial]) — only if has_cell
+    // Variable 3: cell_lengths (record, double, dim=[frame, cell_spatial]) — only if has_cell
+    // Variable 4: cell_angles (record, double, dim=[frame, cell_angular]) — only if has_cell
+
+    // We need to calculate the header end position for data offsets.
+    // Track current position to compute where data starts.
+
+    // Actually, let's compute the full header size first, then seek back to write offsets.
+    // Or better: write variable defs with placeholder offsets, note positions, then fix up.
+
+    // Let me use a simpler approach: compute header size analytically.
+    // Current position after attrs will be the start of variable section.
+    // Each variable def: name(padded) + 4(ndims) + 4*ndims(dimids) + 8(vatt tag+count) + 4(type) + 4(vsize) + 8(begin offset)
+
+    // For now, write all variable defs, track begin-offset positions, then fix them up.
+    const VarDef = struct { begin_file_pos: u64 };
+    var var_defs: [5]VarDef = undefined;
+    var vi: usize = 0;
+
+    // var 0: spatial (non-record)
+    try fileWriteName(file, "spatial");
+    try fileWriteU32(file, 1); // 1 dim
+    try fileWriteU32(file, 1); // dimid=1 (spatial)
+    try fileWriteU32(file, 0); // no attrs tag
+    try fileWriteU32(file, 0); // no attrs count
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, @intCast(spatial_size)); // vsize
+    var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
+    try fileWriteU64(file, 0); // placeholder offset
+    vi += 1;
+
+    // var 1: coordinates (record)
+    try fileWriteName(file, "coordinates");
+    try fileWriteU32(file, 3); // 3 dims
+    try fileWriteU32(file, 0); // dimid=0 (frame, unlimited)
+    try fileWriteU32(file, 2); // dimid=2 (atom)
+    try fileWriteU32(file, 1); // dimid=1 (spatial)
+    // 1 attribute: units = "angstrom"
+    try fileWriteU32(file, NC_ATTRIBUTE);
+    try fileWriteU32(file, 1);
+    try fileWriteName(file, "units");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 8);
+    try file.writeAll("angstrom"); // 8 bytes, already aligned
+    try fileWriteU32(file, NC_FLOAT);
+    try fileWriteU32(file, @intCast(coord_padded)); // vsize
+    var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
+    try fileWriteU64(file, 0); // placeholder
+    vi += 1;
+
+    if (has_cell) {
+        // var 2: cell_spatial (non-record)
+        try fileWriteName(file, "cell_spatial");
+        try fileWriteU32(file, 1); // 1 dim
+        try fileWriteU32(file, 3); // dimid=3 (cell_spatial)
+        try fileWriteU32(file, 0); // no attrs
+        try fileWriteU32(file, 0);
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 4); // vsize: 3 chars padded to 4
+        var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
+        try fileWriteU64(file, 0);
+        vi += 1;
+
+        // var 3: cell_lengths (record)
+        try fileWriteName(file, "cell_lengths");
+        try fileWriteU32(file, 2); // 2 dims
+        try fileWriteU32(file, 0); // dimid=0 (frame)
+        try fileWriteU32(file, 3); // dimid=3 (cell_spatial)
+        try fileWriteU32(file, NC_ATTRIBUTE);
+        try fileWriteU32(file, 1);
+        try fileWriteName(file, "units");
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 8);
+        try file.writeAll("angstrom");
+        try fileWriteU32(file, NC_DOUBLE);
+        try fileWriteU32(file, @intCast(cell_lengths_size));
+        var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
+        try fileWriteU64(file, 0);
+        vi += 1;
+
+        // var 4: cell_angles (record)
+        try fileWriteName(file, "cell_angles");
+        try fileWriteU32(file, 2); // 2 dims
+        try fileWriteU32(file, 0); // dimid=0 (frame)
+        try fileWriteU32(file, 5); // dimid=5 (cell_angular)
+        try fileWriteU32(file, NC_ATTRIBUTE);
+        try fileWriteU32(file, 1);
+        try fileWriteName(file, "units");
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 6);
+        try file.writeAll("degree\x00\x00"); // 6 chars padded to 8
+        try fileWriteU32(file, NC_DOUBLE);
+        try fileWriteU32(file, @intCast(cell_angles_size));
+        var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
+        try fileWriteU64(file, 0);
+        vi += 1;
+    }
+
+    // Now we know where data starts
+    var data_offset = try file.getPos();
+
+    // Non-record variables come first (spatial, cell_spatial)
+    // var 0: spatial data at data_offset
+    const spatial_offset = data_offset;
+    data_offset += spatial_size;
+
+    var cell_spatial_offset: u64 = 0;
+    if (has_cell) {
+        cell_spatial_offset = data_offset;
+        data_offset += 4; // "abc\0"
+    }
+
+    // Record data starts here
+    const record_start = data_offset;
+    const coords_begin = record_start; // first record var
+
+    var cell_lengths_begin: u64 = 0;
+    var cell_angles_begin: u64 = 0;
+    if (has_cell) {
+        cell_lengths_begin = record_start + coord_padded;
+        cell_angles_begin = cell_lengths_begin + cell_lengths_size;
+    }
+
+    // Write non-record data
+    file.seekTo(spatial_offset) catch return NcWriteError.WriteError;
+    try file.writeAll("xyz\x00"); // spatial labels padded to 4
+
+    if (has_cell) {
+        file.seekTo(cell_spatial_offset) catch return NcWriteError.WriteError;
+        try file.writeAll("abc\x00"); // cell_spatial labels
+    }
+
+    // Fix up variable begin offsets
+    vi = 0;
+
+    // var 0: spatial
+    file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
+    try fileWriteU64(file, spatial_offset);
+    vi += 1;
+
+    // var 1: coordinates
+    file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
+    try fileWriteU64(file, coords_begin);
+    vi += 1;
+
+    if (has_cell) {
+        // var 2: cell_spatial
+        file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
+        try fileWriteU64(file, cell_spatial_offset);
+        vi += 1;
+
+        // var 3: cell_lengths
+        file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
+        try fileWriteU64(file, cell_lengths_begin);
+        vi += 1;
+
+        // var 4: cell_angles
+        file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
+        try fileWriteU64(file, cell_angles_begin);
+        vi += 1;
+    }
+
+    // Seek to record data start for frame writing
+    file.seekTo(record_start) catch return NcWriteError.WriteError;
+
+    return HeaderInfo{
+        .numrecs_offset = numrecs_offset,
+        .data_offset = record_start,
+        .rec_size = rec_size,
+    };
+}
+
+fn writeBEf32(buf: *[4]u8, val: f32) void {
+    std.mem.writeInt(u32, buf, @bitCast(val), .big);
+}
+
+fn writeBEf64(buf: *[8]u8, val: f64) void {
+    std.mem.writeInt(u64, buf, @bitCast(val), .big);
+}
+
+fn fileWriteU32(file: std.fs.File, val: u32) !void {
+    var buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &buf, val, .big);
+    file.writeAll(&buf) catch return NcWriteError.WriteError;
+}
+
+fn fileWriteU64(file: std.fs.File, val: u64) !void {
+    var buf: [8]u8 = undefined;
+    std.mem.writeInt(u64, &buf, val, .big);
+    file.writeAll(&buf) catch return NcWriteError.WriteError;
+}
+
+fn fileWriteName(file: std.fs.File, name: []const u8) !void {
+    try fileWriteU32(file, @intCast(name.len));
+    file.writeAll(name) catch return NcWriteError.WriteError;
+    const pad = (4 - (name.len % 4)) % 4;
+    if (pad > 0) {
+        const zeros = [_]u8{ 0, 0, 0 };
+        file.writeAll(zeros[0..pad]) catch return NcWriteError.WriteError;
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -597,10 +1039,100 @@ test "next returns null after all frames read" {
     var reader = try NcReader.open(allocator, "test_data/cpptraj_traj.nc");
     defer reader.deinit();
 
-    // Exhaust all frames
     while (try reader.next()) |_| {}
-
-    // Should return null now
     const result = try reader.next();
     try std.testing.expect(result == null);
+}
+
+test "NcWriter round-trip without cell" {
+    const allocator = std.testing.allocator;
+    const tmp_path = "test_data/_test_nc_roundtrip.nc";
+
+    // Write 2 frames of 3 atoms
+    {
+        var writer = try NcWriter.open(allocator, tmp_path, 3, false);
+        defer writer.deinit();
+
+        var frame = try types.Frame.init(allocator, 3);
+        defer frame.deinit();
+
+        frame.x[0] = 1.0;
+        frame.y[0] = 2.0;
+        frame.z[0] = 3.0;
+        frame.x[1] = 4.0;
+        frame.y[1] = 5.0;
+        frame.z[1] = 6.0;
+        frame.x[2] = 7.5;
+        frame.y[2] = 8.5;
+        frame.z[2] = 9.5;
+        try writer.writeFrame(frame);
+
+        frame.x[0] = 10.0;
+        frame.y[0] = 11.0;
+        frame.z[0] = 12.0;
+        try writer.writeFrame(frame);
+        try writer.close();
+    }
+    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+
+    // Read back and verify
+    var reader = try NcReader.open(allocator, tmp_path);
+    defer reader.deinit();
+
+    try std.testing.expectEqual(@as(u32, 3), reader.nAtoms());
+    try std.testing.expectEqual(@as(u32, 2), reader.nFrames());
+
+    const f0 = (try reader.next()).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), f0.x[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), f0.y[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), f0.z[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.5), f0.x[2], 0.001);
+    try std.testing.expect(f0.box_vectors == null);
+
+    const f1 = (try reader.next()).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), f1.x[0], 0.001);
+
+    try std.testing.expect((try reader.next()) == null);
+}
+
+test "NcWriter round-trip with cell" {
+    const allocator = std.testing.allocator;
+    const tmp_path = "test_data/_test_nc_roundtrip_cell.nc";
+
+    {
+        var writer = try NcWriter.open(allocator, tmp_path, 2, true);
+        defer writer.deinit();
+
+        var frame = try types.Frame.init(allocator, 2);
+        defer frame.deinit();
+
+        frame.x[0] = 1.0;
+        frame.y[0] = 2.0;
+        frame.z[0] = 3.0;
+        frame.x[1] = 4.0;
+        frame.y[1] = 5.0;
+        frame.z[1] = 6.0;
+        frame.box_vectors = .{
+            .{ 50.0, 0.0, 0.0 },
+            .{ 0.0, 50.0, 0.0 },
+            .{ 0.0, 0.0, 50.0 },
+        };
+        try writer.writeFrame(frame);
+        try writer.close();
+    }
+    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+
+    var reader = try NcReader.open(allocator, tmp_path);
+    defer reader.deinit();
+
+    try std.testing.expectEqual(@as(u32, 2), reader.nAtoms());
+    try std.testing.expectEqual(@as(u32, 1), reader.nFrames());
+
+    const f0 = (try reader.next()).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), f0.x[0], 0.001);
+    try std.testing.expect(f0.box_vectors != null);
+    const box = f0.box_vectors.?;
+    try std.testing.expectApproxEqAbs(@as(f32, 50.0), box[0][0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 50.0), box[1][1], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 50.0), box[2][2], 0.01);
 }

@@ -666,3 +666,70 @@ class TrrWriter(_TrajectoryWriter):
             "ztraj_close_trr_writer",
             "trr_writer",
         )
+
+
+class NcWriter:
+    """Streaming AMBER NetCDF trajectory writer (context manager).
+
+    Usage::
+
+        with pyztraj.NcWriter("output.nc", n_atoms, has_cell=True) as writer:
+            writer.write_frame(coords, time=0.0, step=0)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int, *, has_cell: bool = False) -> None:
+        self._ffi = get_ffi()
+        self._lib = get_lib()
+        self._path = str(path).encode("utf-8")
+        self._n_atoms = n_atoms
+        self._has_cell = has_cell
+        self._handle = None
+
+    def __enter__(self):
+        handle_ptr = self._ffi.new("void**")
+        _check(
+            self._lib.ztraj_open_nc_writer(self._path, self._n_atoms, self._has_cell, handle_ptr),
+            "nc_writer",
+        )
+        self._handle = handle_ptr[0]
+        if self._handle == self._ffi.NULL:
+            raise ZtrajError("nc_writer: returned success but handle is null")
+        return self
+
+    def __exit__(self, exc_type, *args) -> None:
+        if self._handle is not None:
+            rc = self._lib.ztraj_close_nc_writer(self._handle)
+            self._handle = None
+            if exc_type is None:
+                _check(rc, "nc_writer/close")
+
+    def write_frame(
+        self,
+        coords: NDArray[np.float32],
+        time: float = 0.0,
+        step: int = 0,
+    ) -> None:
+        """Write a single frame. Coordinates must be (n_atoms, 3) in angstroms."""
+        if self._handle is None:
+            raise ZtrajError("nc_writer: writer is not open")
+
+        coords = np.ascontiguousarray(coords, dtype=np.float32)
+        if coords.shape[0] != self._n_atoms:
+            msg = (
+                f"nc_writer: coords has {coords.shape[0]} atoms but writer expects {self._n_atoms}"
+            )
+            raise ValueError(msg)
+        x, y, z = coords[:, 0].copy(), coords[:, 1].copy(), coords[:, 2].copy()
+
+        _check(
+            self._lib.ztraj_write_nc_frame(
+                self._handle,
+                _ptr_f32(x),
+                _ptr_f32(y),
+                _ptr_f32(z),
+                self._n_atoms,
+                time,
+                step,
+            ),
+            "nc_writer/write_frame",
+        )
