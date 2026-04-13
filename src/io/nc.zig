@@ -649,59 +649,59 @@ fn writeHeader(file: std.fs.File, n_atoms: u32, has_cell: bool) !HeaderInfo {
 
     // numrecs (placeholder — updated on close)
     const numrecs_offset: u64 = 4;
-    try fileWriteU32(file,0);
+    try fileWriteU32(file, 0);
 
     // ---- Dimensions ----
     const n_dims: u32 = if (has_cell) 6 else 3;
-    try fileWriteU32(file,NC_DIMENSION);
-    try fileWriteU32(file,n_dims);
+    try fileWriteU32(file, NC_DIMENSION);
+    try fileWriteU32(file, n_dims);
 
     // dim 0: frame (unlimited)
-    try fileWriteName(file,"frame");
-    try fileWriteU32(file,0); // 0 = unlimited
+    try fileWriteName(file, "frame");
+    try fileWriteU32(file, 0); // 0 = unlimited
 
     // dim 1: spatial
-    try fileWriteName(file,"spatial");
-    try fileWriteU32(file,3);
+    try fileWriteName(file, "spatial");
+    try fileWriteU32(file, 3);
 
     // dim 2: atom
-    try fileWriteName(file,"atom");
-    try fileWriteU32(file,n_atoms);
+    try fileWriteName(file, "atom");
+    try fileWriteU32(file, n_atoms);
 
     if (has_cell) {
         // dim 3: cell_spatial
-        try fileWriteName(file,"cell_spatial");
-        try fileWriteU32(file,3);
+        try fileWriteName(file, "cell_spatial");
+        try fileWriteU32(file, 3);
 
         // dim 4: label
-        try fileWriteName(file,"label");
-        try fileWriteU32(file,5);
+        try fileWriteName(file, "label");
+        try fileWriteU32(file, 5);
 
         // dim 5: cell_angular
-        try fileWriteName(file,"cell_angular");
-        try fileWriteU32(file,3);
+        try fileWriteName(file, "cell_angular");
+        try fileWriteU32(file, 3);
     }
 
     // ---- Global attributes ----
-    try fileWriteU32(file,NC_ATTRIBUTE);
-    try fileWriteU32(file,2); // 2 attributes
+    try fileWriteU32(file, NC_ATTRIBUTE);
+    try fileWriteU32(file, 2); // 2 attributes
 
     // Conventions = "AMBER"
-    try fileWriteName(file,"Conventions");
-    try fileWriteU32(file,NC_CHAR);
-    try fileWriteU32(file,5);
+    try fileWriteName(file, "Conventions");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 5);
     try file.writeAll("AMBER\x00\x00\x00"); // padded to 8 bytes
 
     // ConventionVersion = "1.0"
-    try fileWriteName(file,"ConventionVersion");
-    try fileWriteU32(file,NC_CHAR);
-    try fileWriteU32(file,3);
+    try fileWriteName(file, "ConventionVersion");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 3);
     try file.writeAll("1.0\x00"); // padded to 4 bytes
 
     // ---- Variables ----
     const n_vars: u32 = if (has_cell) 5 else 2;
-    try fileWriteU32(file,NC_VARIABLE);
-    try fileWriteU32(file,n_vars);
+    try fileWriteU32(file, NC_VARIABLE);
+    try fileWriteU32(file, n_vars);
 
     // Compute per-record sizes
     const coord_size: u64 = @as(u64, n_atoms) * 3 * 4;
@@ -740,81 +740,81 @@ fn writeHeader(file: std.fs.File, n_atoms: u32, has_cell: bool) !HeaderInfo {
     var vi: usize = 0;
 
     // var 0: spatial (non-record)
-    try fileWriteName(file,"spatial");
-    try fileWriteU32(file,1); // 1 dim
-    try fileWriteU32(file,1); // dimid=1 (spatial)
-    try fileWriteU32(file,0); // no attrs tag
-    try fileWriteU32(file,0); // no attrs count
-    try fileWriteU32(file,NC_CHAR);
-    try fileWriteU32(file,@intCast(spatial_size)); // vsize
+    try fileWriteName(file, "spatial");
+    try fileWriteU32(file, 1); // 1 dim
+    try fileWriteU32(file, 1); // dimid=1 (spatial)
+    try fileWriteU32(file, 0); // no attrs tag
+    try fileWriteU32(file, 0); // no attrs count
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, @intCast(spatial_size)); // vsize
     var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
-    try fileWriteU64(file,0); // placeholder offset
+    try fileWriteU64(file, 0); // placeholder offset
     vi += 1;
 
     // var 1: coordinates (record)
-    try fileWriteName(file,"coordinates");
-    try fileWriteU32(file,3); // 3 dims
-    try fileWriteU32(file,0); // dimid=0 (frame, unlimited)
-    try fileWriteU32(file,2); // dimid=2 (atom)
-    try fileWriteU32(file,1); // dimid=1 (spatial)
+    try fileWriteName(file, "coordinates");
+    try fileWriteU32(file, 3); // 3 dims
+    try fileWriteU32(file, 0); // dimid=0 (frame, unlimited)
+    try fileWriteU32(file, 2); // dimid=2 (atom)
+    try fileWriteU32(file, 1); // dimid=1 (spatial)
     // 1 attribute: units = "angstrom"
-    try fileWriteU32(file,NC_ATTRIBUTE);
-    try fileWriteU32(file,1);
-    try fileWriteName(file,"units");
-    try fileWriteU32(file,NC_CHAR);
-    try fileWriteU32(file,8);
+    try fileWriteU32(file, NC_ATTRIBUTE);
+    try fileWriteU32(file, 1);
+    try fileWriteName(file, "units");
+    try fileWriteU32(file, NC_CHAR);
+    try fileWriteU32(file, 8);
     try file.writeAll("angstrom"); // 8 bytes, already aligned
-    try fileWriteU32(file,NC_FLOAT);
-    try fileWriteU32(file,@intCast(coord_padded)); // vsize
+    try fileWriteU32(file, NC_FLOAT);
+    try fileWriteU32(file, @intCast(coord_padded)); // vsize
     var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
-    try fileWriteU64(file,0); // placeholder
+    try fileWriteU64(file, 0); // placeholder
     vi += 1;
 
     if (has_cell) {
         // var 2: cell_spatial (non-record)
-        try fileWriteName(file,"cell_spatial");
-        try fileWriteU32(file,1); // 1 dim
-        try fileWriteU32(file,3); // dimid=3 (cell_spatial)
-        try fileWriteU32(file,0); // no attrs
-        try fileWriteU32(file,0);
-        try fileWriteU32(file,NC_CHAR);
-        try fileWriteU32(file,4); // vsize: 3 chars padded to 4
+        try fileWriteName(file, "cell_spatial");
+        try fileWriteU32(file, 1); // 1 dim
+        try fileWriteU32(file, 3); // dimid=3 (cell_spatial)
+        try fileWriteU32(file, 0); // no attrs
+        try fileWriteU32(file, 0);
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 4); // vsize: 3 chars padded to 4
         var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
-        try fileWriteU64(file,0);
+        try fileWriteU64(file, 0);
         vi += 1;
 
         // var 3: cell_lengths (record)
-        try fileWriteName(file,"cell_lengths");
-        try fileWriteU32(file,2); // 2 dims
-        try fileWriteU32(file,0); // dimid=0 (frame)
-        try fileWriteU32(file,3); // dimid=3 (cell_spatial)
-        try fileWriteU32(file,NC_ATTRIBUTE);
-        try fileWriteU32(file,1);
-        try fileWriteName(file,"units");
-        try fileWriteU32(file,NC_CHAR);
-        try fileWriteU32(file,8);
+        try fileWriteName(file, "cell_lengths");
+        try fileWriteU32(file, 2); // 2 dims
+        try fileWriteU32(file, 0); // dimid=0 (frame)
+        try fileWriteU32(file, 3); // dimid=3 (cell_spatial)
+        try fileWriteU32(file, NC_ATTRIBUTE);
+        try fileWriteU32(file, 1);
+        try fileWriteName(file, "units");
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 8);
         try file.writeAll("angstrom");
-        try fileWriteU32(file,NC_DOUBLE);
-        try fileWriteU32(file,@intCast(cell_lengths_size));
+        try fileWriteU32(file, NC_DOUBLE);
+        try fileWriteU32(file, @intCast(cell_lengths_size));
         var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
-        try fileWriteU64(file,0);
+        try fileWriteU64(file, 0);
         vi += 1;
 
         // var 4: cell_angles (record)
-        try fileWriteName(file,"cell_angles");
-        try fileWriteU32(file,2); // 2 dims
-        try fileWriteU32(file,0); // dimid=0 (frame)
-        try fileWriteU32(file,5); // dimid=5 (cell_angular)
-        try fileWriteU32(file,NC_ATTRIBUTE);
-        try fileWriteU32(file,1);
-        try fileWriteName(file,"units");
-        try fileWriteU32(file,NC_CHAR);
-        try fileWriteU32(file,6);
+        try fileWriteName(file, "cell_angles");
+        try fileWriteU32(file, 2); // 2 dims
+        try fileWriteU32(file, 0); // dimid=0 (frame)
+        try fileWriteU32(file, 5); // dimid=5 (cell_angular)
+        try fileWriteU32(file, NC_ATTRIBUTE);
+        try fileWriteU32(file, 1);
+        try fileWriteName(file, "units");
+        try fileWriteU32(file, NC_CHAR);
+        try fileWriteU32(file, 6);
         try file.writeAll("degree\x00\x00"); // 6 chars padded to 8
-        try fileWriteU32(file,NC_DOUBLE);
-        try fileWriteU32(file,@intCast(cell_angles_size));
+        try fileWriteU32(file, NC_DOUBLE);
+        try fileWriteU32(file, @intCast(cell_angles_size));
         var_defs[vi] = .{ .begin_file_pos = try file.getPos() };
-        try fileWriteU64(file,0);
+        try fileWriteU64(file, 0);
         vi += 1;
     }
 
@@ -857,28 +857,28 @@ fn writeHeader(file: std.fs.File, n_atoms: u32, has_cell: bool) !HeaderInfo {
 
     // var 0: spatial
     file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
-    try fileWriteU64(file,spatial_offset);
+    try fileWriteU64(file, spatial_offset);
     vi += 1;
 
     // var 1: coordinates
     file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
-    try fileWriteU64(file,coords_begin);
+    try fileWriteU64(file, coords_begin);
     vi += 1;
 
     if (has_cell) {
         // var 2: cell_spatial
         file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
-        try fileWriteU64(file,cell_spatial_offset);
+        try fileWriteU64(file, cell_spatial_offset);
         vi += 1;
 
         // var 3: cell_lengths
         file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
-        try fileWriteU64(file,cell_lengths_begin);
+        try fileWriteU64(file, cell_lengths_begin);
         vi += 1;
 
         // var 4: cell_angles
         file.seekTo(var_defs[vi].begin_file_pos) catch return NcWriteError.WriteError;
-        try fileWriteU64(file,cell_angles_begin);
+        try fileWriteU64(file, cell_angles_begin);
         vi += 1;
     }
 
@@ -891,8 +891,6 @@ fn writeHeader(file: std.fs.File, n_atoms: u32, has_cell: bool) !HeaderInfo {
         .rec_size = rec_size,
     };
 }
-
-
 
 fn writeBEf32(buf: *[4]u8, val: f32) void {
     std.mem.writeInt(u32, buf, @bitCast(val), .big);
