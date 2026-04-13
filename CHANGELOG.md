@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.1] - 2026-04-13
+
+### Added
+- #90 AMBER PRMTOP topology parser (.prmtop, .parm7, .top)
+  - Atom names, residues, bonds from POINTERS/ATOM_NAME/RESIDUE_LABEL/BONDS sections
+  - ATOMIC_NUMBER for element assignment (amber12+) with fallback heuristic
+  - Partial charges (CHARGE section) and force-field masses (MASS section)
+  - Chamber-style topology detection with clear error
+- #91 AMBER NetCDF trajectory reader (.nc, .ncdf)
+  - NetCDF-3 classic and 64-bit offset format support
+  - Streaming NcReader API matching XtcReader/DcdReader/TrrReader pattern
+  - Coordinates, time, cell_lengths, cell_angles with triclinic box conversion
+  - No external NetCDF library dependency
+
+### Changed
+- Topology struct gains optional `charges` and `explicit_masses` fields (SOA, null when absent)
+- `Topology.masses()` prefers explicit force-field masses over element-derived values
+- `Topology.validate()` checks charges/explicit_masses length consistency
+
 ## [0.6.0] - 2026-03-29
 
 ### Added
