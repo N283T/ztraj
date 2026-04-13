@@ -200,6 +200,13 @@ _CDEF = """
                               size_t n_atoms, float time, int32_t step);
     int ztraj_close_trr_writer(void* handle);
 
+    // File writers: AMBER NetCDF trajectory
+    int ztraj_open_nc_writer(const char* path, uint32_t n_atoms, _Bool has_cell,
+                             void** handle_out);
+    int ztraj_write_nc_frame(void* handle, const float* x, const float* y, const float* z,
+                             size_t n_atoms, float time, int32_t step);
+    int ztraj_close_nc_writer(void* handle);
+
     // Atom selection
     int ztraj_select_keyword(void* handle, int keyword, uint32_t** indices_out, size_t* count_out);
     int ztraj_select_name(void* handle, const char* name,

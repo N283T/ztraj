@@ -39,6 +39,7 @@ from pyztraj.geometry import (
 from pyztraj.io import (
     DcdReader,
     NcReader,
+    NcWriter,
     Structure,
     TrrReader,
     TrrWriter,
@@ -74,6 +75,7 @@ __all__ = [
     "TrrWriter",
     "DcdReader",
     "NcReader",
+    "NcWriter",
     "ZtrajError",
     "analyze_all",
     "compute_angles",

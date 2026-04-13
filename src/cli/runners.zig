@@ -1509,9 +1509,9 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
         std.process.exit(1);
     };
 
-    const is_traj_output = loader.isXtc(output_path) or loader.isTrr(output_path);
+    const is_traj_output = loader.isXtc(output_path) or loader.isTrr(output_path) or loader.isNc(output_path);
     const is_traj_input = loader.isXtc(args.traj_path) or
-        loader.isTrr(args.traj_path) or loader.isDcd(args.traj_path);
+        loader.isTrr(args.traj_path) or loader.isDcd(args.traj_path) or loader.isNc(args.traj_path);
 
     // Trajectory conversion: read all frames, write to trajectory format
     if (is_traj_output or is_traj_input) {
@@ -1543,6 +1543,12 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
             defer writer.deinit();
             for (frames) |frame| try writer.writeFrame(frame);
             try writer.close();
+        } else if (loader.isNc(output_path)) {
+            const has_cell = frames[0].box_vectors != null;
+            var writer = try ztraj.io.nc.NcWriter.open(allocator, output_path, @intCast(n_atoms), has_cell);
+            defer writer.deinit();
+            for (frames) |frame| try writer.writeFrame(frame);
+            try writer.close();
         } else if (loader.isPdb(output_path)) {
             // Trajectory → single-structure: write first frame only
             var buf = std.ArrayList(u8){};
@@ -1560,7 +1566,7 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
             try flushOutput(buf.items, output_path);
         } else {
             std.debug.print(
-                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr)\n",
+                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr, .nc)\n",
                 .{output_path},
             );
             std.process.exit(1);
@@ -1584,7 +1590,7 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
             try ztraj.io.gro.write(w, parsed.topology, parsed.frame);
         } else {
             std.debug.print(
-                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr)\n",
+                "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr, .nc)\n",
                 .{output_path},
             );
             std.process.exit(1);
