@@ -55,7 +55,8 @@ pub fn isPrmtop(path: []const u8) bool {
 // Topology loading
 // ============================================================================
 
-/// Load topology + first frame from a PDB, CIF, or GRO file.
+/// Load topology + first frame from a structure or topology file.
+/// Supported formats: PDB, CIF/mmCIF, GRO, PRMTOP/PARM7.
 /// Returns a ParseResult; caller must call .deinit().
 pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.ParseResult {
     const data = try std.fs.cwd().readFileAlloc(allocator, path, 512 * 1024 * 1024);

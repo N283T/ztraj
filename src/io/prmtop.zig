@@ -1,7 +1,7 @@
 //! AMBER PRMTOP topology file parser.
 //!
 //! Parses AMBER parm7 format files (.prmtop, .parm7, .top) and returns a
-//! Topology containing atoms, residues, chains, and bonds.
+//! Topology containing atoms, residues, chains, bonds, charges, and masses.
 //!
 //! ## PRMTOP Format
 //!
@@ -11,6 +11,8 @@
 //! - POINTERS:             System counts (NATOM, NRES, NBONH, MBONA, ...)
 //! - ATOM_NAME:            Atom names (20a4)
 //! - ATOMIC_NUMBER:        Atomic numbers (10I8) — optional (amber12+)
+//! - CHARGE:               Partial charges (5E16.8) — optional
+//! - MASS:                 Atomic masses in daltons (5E16.8) — optional
 //! - RESIDUE_LABEL:        Residue names (20a4)
 //! - RESIDUE_POINTER:      First atom of each residue (10I8, 1-indexed)
 //! - BONDS_INC_HYDROGEN:   Bonds with H (10I8, coordinate indices)
@@ -19,7 +21,7 @@
 //! Bond atom indices in prmtop are stored as coordinate array offsets
 //! (actual_atom_index * 3). To recover atom indices, divide by 3.
 //!
-//! Reference: https://ambermd.org/FileFormats.php#topo.cntrl
+//! Reference: https://ambermd.org/FileFormats.php
 
 const std = @import("std");
 const types = @import("../types.zig");
@@ -47,8 +49,13 @@ const PTR_NRES: usize = 11;
 const PTR_NBONH: usize = 2;
 const PTR_MBONA: usize = 3;
 
-/// Parsed FORTRAN format: field count and field width.
-/// e.g. "20a4" -> count=20, width=4; "10I8" -> count=10, width=8
+/// AMBER internal charge unit conversion factor.
+/// AMBER stores charges pre-multiplied by 18.2223 (= sqrt(332.0636 kcal*A/mol*e^2))
+/// so that Coulomb energy E = q_i * q_j / r can be computed without the constant.
+const amber_charge_factor: f64 = 18.2223;
+
+/// Parsed FORTRAN format: only the field width is retained.
+/// e.g. "20a4" -> width=4; "10I8" -> width=8; "5E16.8" -> width=16
 const FortranFormat = struct {
     width: u32,
 };
@@ -104,8 +111,7 @@ fn inferElement(atom_name: []const u8) elem.Element {
     return elem.fromSymbol(&[_]u8{upper[0]});
 }
 
-/// Parse a PRMTOP file and return a topology-only result.
-/// The returned ParseResult has a zero-atom Frame (no coordinates in prmtop).
+/// Parse a PRMTOP file and return topology data.
 /// prmtop is a topology-only format — no coordinate data is stored.
 /// Returns Topology directly; caller must call .deinit().
 pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topology {
@@ -167,7 +173,8 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
                 return ParseError.ChamberNotSupported;
             }
         } else if (std.mem.startsWith(u8, trimmed, "%FORMAT")) {
-            current_format = parseFortranFormat(trimmed);
+            current_format = parseFortranFormat(trimmed) orelse
+                return ParseError.InvalidFormatSpec;
             data_start = line_end;
         } else if (std.mem.startsWith(u8, trimmed, "%VERSION") or
             std.mem.startsWith(u8, trimmed, "%COMMENT"))
@@ -377,10 +384,12 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
             while (fi + 2 < bond_fields.len) : (fi += 3) {
                 const ai_str = std.mem.trim(u8, bond_fields[fi], " ");
                 const aj_str = std.mem.trim(u8, bond_fields[fi + 1], " ");
-                const ai_raw = std.fmt.parseInt(i32, ai_str, 10) catch continue;
-                const aj_raw = std.fmt.parseInt(i32, aj_str, 10) catch continue;
+                const ai_raw = std.fmt.parseInt(i32, ai_str, 10) catch
+                    return ParseError.InvalidFieldValue;
+                const aj_raw = std.fmt.parseInt(i32, aj_str, 10) catch
+                    return ParseError.InvalidFieldValue;
                 if (ai_raw < 0 or aj_raw < 0) continue;
-                bonds_list.appendAssumeCapacity(BondRaw{
+                try bonds_list.append(allocator, BondRaw{
                     .atom_i = @intCast(@divTrunc(@as(u32, @intCast(ai_raw)), 3)),
                     .atom_j = @intCast(@divTrunc(@as(u32, @intCast(aj_raw)), 3)),
                 });
@@ -436,12 +445,15 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
 
         // Find residue index for this atom
         var res_idx: u32 = 0;
+        var found_res = false;
         for (0..n_res) |ri| {
             if (ai >= res_first_atom[ri] and ai < res_first_atom[ri + 1]) {
                 res_idx = @intCast(ri);
+                found_res = true;
                 break;
             }
         }
+        if (!found_res) return ParseError.InconsistentData;
 
         topology.atoms[ai] = types.Atom{
             .name = types.FixedString(4).fromSlice(atom_name),
@@ -458,31 +470,31 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
         };
     }
 
-    // Fill charges (AMBER units / 18.2223 → electron charge units)
+    // Fill charges (convert from AMBER internal units to electron charges)
     if (charge_fields) |cf| {
-        if (cf.len >= n_atoms) {
-            const charges = try allocator.alloc(f32, n_atoms);
-            errdefer allocator.free(charges);
-            for (0..n_atoms) |ai| {
-                const field = std.mem.trim(u8, cf[ai], " ");
-                const amber_charge = std.fmt.parseFloat(f64, field) catch 0.0;
-                charges[ai] = @floatCast(amber_charge / 18.2223);
-            }
-            topology.charges = charges;
+        if (cf.len < n_atoms) return ParseError.InconsistentData;
+        const charges = try allocator.alloc(f32, n_atoms);
+        errdefer allocator.free(charges);
+        for (0..n_atoms) |ai| {
+            const field = std.mem.trim(u8, cf[ai], " ");
+            const amber_charge = std.fmt.parseFloat(f64, field) catch
+                return ParseError.InvalidFieldValue;
+            charges[ai] = @floatCast(amber_charge / amber_charge_factor);
         }
+        topology.charges = charges;
     }
 
     // Fill explicit masses (daltons, directly usable)
     if (mass_fields) |mf| {
-        if (mf.len >= n_atoms) {
-            const em = try allocator.alloc(f32, n_atoms);
-            errdefer allocator.free(em);
-            for (0..n_atoms) |ai| {
-                const field = std.mem.trim(u8, mf[ai], " ");
-                em[ai] = @floatCast(std.fmt.parseFloat(f64, field) catch 0.0);
-            }
-            topology.explicit_masses = em;
+        if (mf.len < n_atoms) return ParseError.InconsistentData;
+        const em = try allocator.alloc(f32, n_atoms);
+        errdefer allocator.free(em);
+        for (0..n_atoms) |ai| {
+            const field = std.mem.trim(u8, mf[ai], " ");
+            em[ai] = @floatCast(std.fmt.parseFloat(f64, field) catch
+                return ParseError.InvalidFieldValue);
         }
+        topology.explicit_masses = em;
     }
 
     try topology.validate();
@@ -621,12 +633,24 @@ test "parse cpptraj prmtop with ATOMIC_NUMBER" {
     try std.testing.expectEqual(elem.Element.H, topo.atoms[1].element); // H1 (atomic number 1)
     try std.testing.expectEqual(elem.Element.C, topo.atoms[4].element); // CA (atomic number 6)
 
-    // Verify bonds exist
-    try std.testing.expect(topo.bonds.len > 0);
+    // Verify exact bond count (NBONH=37 + MBONA=48 = 85)
+    try std.testing.expectEqual(@as(usize, 85), topo.bonds.len);
+
+    // Verify charges and masses are populated
+    try std.testing.expect(topo.charges != null);
+    try std.testing.expectEqual(@as(usize, 84), topo.charges.?.len);
+    try std.testing.expect(topo.explicit_masses != null);
+    try std.testing.expectEqual(@as(usize, 84), topo.explicit_masses.?.len);
 }
 
 test "invalid prmtop rejected" {
     const allocator = std.testing.allocator;
     try std.testing.expectError(ParseError.InvalidFormat, parseTopology(allocator, "not a prmtop file"));
     try std.testing.expectError(ParseError.InvalidFormat, parseTopology(allocator, ""));
+}
+
+test "chamber prmtop rejected" {
+    const allocator = std.testing.allocator;
+    const chamber_data = "%VERSION  VERSION_STAMP = V0001.000\n%FLAG CTITLE\n%FORMAT(20a4)\nsome title\n";
+    try std.testing.expectError(ParseError.ChamberNotSupported, parseTopology(allocator, chamber_data));
 }

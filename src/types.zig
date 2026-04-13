@@ -204,6 +204,14 @@ pub const Topology = struct {
             if (bond.atom_i >= self.atoms.len or bond.atom_j >= self.atoms.len)
                 return error.InvalidBondIndex;
         }
+        if (self.charges) |c| {
+            if (c.len != self.atoms.len)
+                return error.InvalidChargesLength;
+        }
+        if (self.explicit_masses) |m| {
+            if (m.len != self.atoms.len)
+                return error.InvalidMassesLength;
+        }
     }
 
     /// Build a flat array of atomic masses (daltons) in atom-index order.
@@ -213,6 +221,7 @@ pub const Topology = struct {
     pub fn masses(self: Topology, allocator: std.mem.Allocator) ![]f64 {
         const result = try allocator.alloc(f64, self.atoms.len);
         if (self.explicit_masses) |em| {
+            std.debug.assert(em.len == self.atoms.len);
             for (em, 0..) |m, i| {
                 result[i] = @floatCast(m);
             }
@@ -546,6 +555,81 @@ test "Topology masses unknown element is zero" {
     defer allocator.free(m);
 
     try std.testing.expectEqual(@as(f64, 0.0), m[0]);
+}
+
+test "Topology masses prefers explicit_masses" {
+    const allocator = std.testing.allocator;
+    var topo = try Topology.init(allocator, .{
+        .n_atoms = 2,
+        .n_residues = 1,
+        .n_chains = 1,
+        .n_bonds = 0,
+    });
+    defer topo.deinit();
+
+    topo.atoms[0] = .{
+        .name = FixedString(4).fromSlice("N"),
+        .element = .N,
+        .residue_index = 0,
+    };
+    topo.atoms[1] = .{
+        .name = FixedString(4).fromSlice("C"),
+        .element = .C,
+        .residue_index = 0,
+    };
+    topo.residues[0] = .{
+        .name = FixedString(5).fromSlice("ALA"),
+        .chain_index = 0,
+        .atom_range = .{ .start = 0, .len = 2 },
+        .resid = 1,
+    };
+    topo.chains[0] = .{
+        .name = FixedString(4).fromSlice("A"),
+        .residue_range = .{ .start = 0, .len = 1 },
+    };
+
+    // Set explicit masses intentionally different from element-derived
+    const em = try allocator.alloc(f32, 2);
+    em[0] = 99.0; // Not 14.007 (nitrogen)
+    em[1] = 88.0; // Not 12.011 (carbon)
+    topo.explicit_masses = em;
+
+    const m = try topo.masses(allocator);
+    defer allocator.free(m);
+
+    // Should return explicit values, not element-derived
+    try std.testing.expectApproxEqAbs(@as(f64, 99.0), m[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 88.0), m[1], 0.001);
+}
+
+test "Topology validate catches mismatched charges length" {
+    const allocator = std.testing.allocator;
+    var topo = try Topology.init(allocator, .{
+        .n_atoms = 2,
+        .n_residues = 1,
+        .n_chains = 1,
+        .n_bonds = 0,
+    });
+    defer topo.deinit();
+
+    for (topo.atoms) |*atom| {
+        atom.* = .{ .name = FixedString(4).fromSlice("C"), .element = .C, .residue_index = 0 };
+    }
+    topo.residues[0] = .{
+        .name = FixedString(5).fromSlice("X"),
+        .chain_index = 0,
+        .atom_range = .{ .start = 0, .len = 2 },
+        .resid = 1,
+    };
+    topo.chains[0] = .{
+        .name = FixedString(4).fromSlice(""),
+        .residue_range = .{ .start = 0, .len = 1 },
+    };
+
+    // Wrong length charges
+    const c = try allocator.alloc(f32, 1); // n_atoms=2 but charges.len=1
+    topo.charges = c;
+    try std.testing.expectError(error.InvalidChargesLength, topo.validate());
 }
 
 test "Frame init and deinit" {
