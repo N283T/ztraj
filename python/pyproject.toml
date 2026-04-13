@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyztraj"
-version = "0.6.0"
+version = "0.6.1"
 description = "Fast molecular dynamics trajectory analysis powered by Zig"
 readme = "README.md"
 license = "MIT"
