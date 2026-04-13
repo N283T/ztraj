@@ -51,6 +51,10 @@ pub fn isPrmtop(path: []const u8) bool {
     return endsWithCI(path, ".prmtop") or endsWithCI(path, ".parm7") or endsWithCI(path, ".top");
 }
 
+pub fn isNc(path: []const u8) bool {
+    return endsWithCI(path, ".nc") or endsWithCI(path, ".ncdf");
+}
+
 // ============================================================================
 // Topology loading
 // ============================================================================
@@ -154,6 +158,20 @@ pub fn loadTrajectoryInfo(
             n_frames += 1;
         }
         return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
+    } else if (isNc(traj_path)) {
+        var reader = try io.nc.NcReader.open(allocator, traj_path);
+        defer reader.deinit();
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+
+        var n_frames: usize = 0;
+        var first_time: ?f32 = null;
+        var last_time: ?f32 = null;
+        while (try reader.next()) |frame_ptr| {
+            if (first_time == null) first_time = frame_ptr.time;
+            last_time = frame_ptr.time;
+            n_frames += 1;
+        }
+        return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
     } else {
         const data = try std.fs.cwd().readFileAlloc(allocator, traj_path, 512 * 1024 * 1024);
         defer allocator.free(data);
@@ -179,7 +197,7 @@ pub fn loadTrajectoryInfo(
 }
 
 fn unsupportedTrajectoryFormat(_: []const u8) error{UnsupportedFormat} {
-    printStderr("error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .pdb, .cif, .mmcif, .gro)\n");
+    printStderr("error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .nc, .pdb, .cif, .mmcif, .gro)\n");
     return error.UnsupportedFormat;
 }
 
@@ -230,6 +248,21 @@ pub fn loadAllFrames(
         }
     } else if (isTrr(traj_path)) {
         var reader = try io.trr.TrrReader.open(allocator, traj_path);
+        defer reader.deinit();
+        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        while (try reader.next()) |frame_ptr| {
+            var copy = try types.Frame.init(allocator, n_atoms);
+            @memcpy(copy.x, frame_ptr.x);
+            @memcpy(copy.y, frame_ptr.y);
+            @memcpy(copy.z, frame_ptr.z);
+            copy.time = frame_ptr.time;
+            copy.step = frame_ptr.step;
+            copy.box_vectors = frame_ptr.box_vectors;
+            try frames.append(allocator, copy);
+            progress_node.completeOne();
+        }
+    } else if (isNc(traj_path)) {
+        var reader = try io.nc.NcReader.open(allocator, traj_path);
         defer reader.deinit();
         try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {

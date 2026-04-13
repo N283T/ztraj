@@ -43,6 +43,7 @@ pub const io = struct {
     pub const dcd = @import("io/dcd.zig");
     pub const gro = @import("io/gro.zig");
     pub const prmtop = @import("io/prmtop.zig");
+    pub const nc = @import("io/nc.zig");
 };
 
 pub const select = @import("select.zig");
@@ -58,4 +59,5 @@ test {
     // Explicitly pull in parser tests (not reached by non-recursive refAllDecls)
     _ = io.gro;
     _ = io.prmtop;
+    _ = io.nc;
 }
