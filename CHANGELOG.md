@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.1] - 2026-04-13
+
+### Added
+- #90 AMBER PRMTOP topology parser (.prmtop, .parm7, .top)
+  - Atom names, residues, bonds, partial charges, force-field masses
+  - ATOMIC_NUMBER element assignment (amber12+) with fallback heuristic
+  - Chamber-style topology detection with clear error
+- #91 AMBER NetCDF trajectory reader (.nc, .ncdf)
+  - NetCDF-3 classic and 64-bit offset format (no external dependency)
+  - Streaming NcReader API matching XtcReader/DcdReader/TrrReader pattern
+  - Coordinates, time, cell_lengths/cell_angles with triclinic box conversion
+- #93 Python bindings for AMBER formats
+  - `pyztraj.load_prmtop()`: topology loading with masses and charges
+  - `pyztraj.open_nc()` / `NcReader`: streaming NetCDF trajectory reader
+  - C API: `ztraj_load_prmtop`, `ztraj_open_nc`, `ztraj_read_nc_frame`, `ztraj_close_nc`
+
+### Changed
+- Topology gains optional `charges` and `explicit_masses` fields (null when absent)
+- `Topology.masses()` prefers explicit force-field masses over element-derived values
+- `Topology.validate()` checks charges/explicit_masses length consistency
+
+### Fixed
+- `ztraj_get_n_atoms` C API uses topology atom count (was frame count, returned 0 for topology-only formats)
+- Analysis C API functions validate n_atoms against topology (was frame, broke prmtop workflow)
+
 ## [0.6.0] - 2026-03-29
 
 ### Added
