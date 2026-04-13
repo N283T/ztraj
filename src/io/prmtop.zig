@@ -575,14 +575,14 @@ test "parse alanine dipeptide implicit prmtop" {
     try std.testing.expectEqual(@as(u32, 16), topo.residues[2].atom_range.start);
     try std.testing.expectEqual(@as(u32, 6), topo.residues[2].atom_range.len);
 
-    // Check some atom names
-    try std.testing.expect(topo.atoms[0].name.eqlSlice("HH31"));
+    // Check some atom names (ff14SB naming)
+    try std.testing.expect(topo.atoms[0].name.eqlSlice("H1"));
     try std.testing.expect(topo.atoms[1].name.eqlSlice("CH3"));
     try std.testing.expect(topo.atoms[4].name.eqlSlice("C"));
     try std.testing.expect(topo.atoms[6].name.eqlSlice("N"));
 
-    // Check element inference (no ATOMIC_NUMBER in this file)
-    try std.testing.expectEqual(elem.Element.H, topo.atoms[0].element); // HH31
+    // Check element assignment (ATOMIC_NUMBER present in ff14SB prmtop)
+    try std.testing.expectEqual(elem.Element.H, topo.atoms[0].element); // H1
     try std.testing.expectEqual(elem.Element.C, topo.atoms[1].element); // CH3
     try std.testing.expectEqual(elem.Element.C, topo.atoms[4].element); // C
     try std.testing.expectEqual(elem.Element.O, topo.atoms[5].element); // O
@@ -616,7 +616,7 @@ test "parse alanine dipeptide implicit prmtop" {
     try std.testing.expectApproxEqAbs(@as(f64, 12.01), mass_arr[1], 0.001);
 }
 
-test "parse cpptraj prmtop with ATOMIC_NUMBER" {
+test "parse pentapeptide prmtop with ATOMIC_NUMBER" {
     const allocator = std.testing.allocator;
     const data = try readTestFile(allocator, "test_data/cpptraj_traj.prmtop");
     defer allocator.free(data);
@@ -624,23 +624,23 @@ test "parse cpptraj prmtop with ATOMIC_NUMBER" {
     var topo = try parseTopology(allocator, data);
     defer topo.deinit();
 
-    // cpptraj_traj.prmtop: 84 atoms, 5 residues
-    try std.testing.expectEqual(@as(usize, 84), topo.atoms.len);
+    // ASP-ALA-TRP-GLU-ILE pentapeptide: 80 atoms, 5 residues
+    try std.testing.expectEqual(@as(usize, 80), topo.atoms.len);
     try std.testing.expectEqual(@as(usize, 5), topo.residues.len);
 
     // Verify ATOMIC_NUMBER-based element assignment
     try std.testing.expectEqual(elem.Element.N, topo.atoms[0].element); // N (atomic number 7)
-    try std.testing.expectEqual(elem.Element.H, topo.atoms[1].element); // H1 (atomic number 1)
-    try std.testing.expectEqual(elem.Element.C, topo.atoms[4].element); // CA (atomic number 6)
+    try std.testing.expectEqual(elem.Element.H, topo.atoms[1].element); // H (atomic number 1)
+    try std.testing.expectEqual(elem.Element.C, topo.atoms[2].element); // CA (atomic number 6)
 
-    // Verify exact bond count (NBONH=37 + MBONA=48 = 85)
-    try std.testing.expectEqual(@as(usize, 85), topo.bonds.len);
+    // Verify exact bond count (NBONH=36 + MBONA=45 = 81)
+    try std.testing.expectEqual(@as(usize, 81), topo.bonds.len);
 
     // Verify charges and masses are populated
     try std.testing.expect(topo.charges != null);
-    try std.testing.expectEqual(@as(usize, 84), topo.charges.?.len);
+    try std.testing.expectEqual(@as(usize, 80), topo.charges.?.len);
     try std.testing.expect(topo.explicit_masses != null);
-    try std.testing.expectEqual(@as(usize, 84), topo.explicit_masses.?.len);
+    try std.testing.expectEqual(@as(usize, 80), topo.explicit_masses.?.len);
 }
 
 test "invalid prmtop rejected" {

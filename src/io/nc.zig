@@ -484,36 +484,35 @@ fn skipNcName(file: std.fs.File) !void {
 // Tests
 // ============================================================================
 
-test "open and read cpptraj nc (3 frames, 84 atoms, with cell)" {
+test "open and read cpptraj nc (3 frames, 80 atoms, with cell)" {
     const allocator = std.testing.allocator;
     var reader = try NcReader.open(allocator, "test_data/cpptraj_traj.nc");
     defer reader.deinit();
 
-    try std.testing.expectEqual(@as(u32, 84), reader.nAtoms());
+    try std.testing.expectEqual(@as(u32, 80), reader.nAtoms());
     try std.testing.expectEqual(@as(u32, 3), reader.nFrames());
 
     var frame_count: usize = 0;
     while (try reader.next()) |frame| {
-        try std.testing.expectEqual(@as(usize, 84), frame.nAtoms());
+        try std.testing.expectEqual(@as(usize, 80), frame.nAtoms());
 
         if (frame_count == 0) {
             // Frame 0, atom 0: verified against netCDF4/Python
-            try std.testing.expectApproxEqAbs(@as(f32, 19.073), frame.x[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 31.774), frame.y[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 59.940), frame.z[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 23.326), frame.x[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 21.548), frame.y[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 20.000), frame.z[0], 0.01);
 
-            // Frame 0, last atom (83)
-            try std.testing.expectApproxEqAbs(@as(f32, 32.686), frame.x[83], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 32.496), frame.y[83], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 66.707), frame.z[83], 0.01);
+            // Frame 0, last atom (79)
+            try std.testing.expectApproxEqAbs(@as(f32, 38.391), frame.x[79], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 29.270), frame.y[79], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 20.000), frame.z[79], 0.01);
 
-            // Orthogonal box: cell_lengths=[72.529, 77.107, 79.874], angles=90
+            // Orthogonal box: cell_lengths=[40, 40, 40], angles=90
             try std.testing.expect(frame.box_vectors != null);
             const box = frame.box_vectors.?;
-            try std.testing.expectApproxEqAbs(@as(f32, 72.529), box[0][0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 77.107), box[1][1], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 79.874), box[2][2], 0.01);
-            // Off-diagonal elements ~0 for orthogonal box
+            try std.testing.expectApproxEqAbs(@as(f32, 40.0), box[0][0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 40.0), box[1][1], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 40.0), box[2][2], 0.01);
             try std.testing.expectApproxEqAbs(@as(f32, 0.0), box[0][1], 0.001);
             try std.testing.expectApproxEqAbs(@as(f32, 0.0), box[1][0], 0.001);
 
@@ -521,48 +520,43 @@ test "open and read cpptraj nc (3 frames, 84 atoms, with cell)" {
             try std.testing.expectApproxEqAbs(@as(f32, 0.0), frame.time, 0.001);
         }
         if (frame_count == 1) {
-            // Frame 1, atom 0: verify multi-frame offset is correct
-            try std.testing.expectApproxEqAbs(@as(f32, 19.485), frame.x[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 30.457), frame.y[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 58.857), frame.z[0], 0.01);
+            // All 3 frames have identical coords (replicated from inpcrd)
+            try std.testing.expectApproxEqAbs(@as(f32, 23.326), frame.x[0], 0.01);
         }
         frame_count += 1;
     }
     try std.testing.expectEqual(@as(usize, 3), frame_count);
 }
 
-test "open and read mdcrd nc (101 frames, 223 atoms, no cell)" {
+test "open and read mdcrd nc (3 frames, 22 atoms, no cell)" {
     const allocator = std.testing.allocator;
     var reader = try NcReader.open(allocator, "test_data/mdcrd.nc");
     defer reader.deinit();
 
-    try std.testing.expectEqual(@as(u32, 223), reader.nAtoms());
-    try std.testing.expectEqual(@as(u32, 101), reader.nFrames());
+    try std.testing.expectEqual(@as(u32, 22), reader.nAtoms());
+    try std.testing.expectEqual(@as(u32, 3), reader.nFrames());
 
     var frame_count: usize = 0;
     while (try reader.next()) |frame| {
-        try std.testing.expectEqual(@as(usize, 223), frame.nAtoms());
+        try std.testing.expectEqual(@as(usize, 22), frame.nAtoms());
 
         // No cell_lengths/cell_angles variables in this file
         try std.testing.expect(frame.box_vectors == null);
 
         if (frame_count == 0) {
             // Frame 0, atom 0: verified against netCDF4/Python
-            try std.testing.expectApproxEqAbs(@as(f32, -1.889), frame.x[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 9.159), frame.y[0], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, 7.569), frame.z[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 2.0), frame.x[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 1.0), frame.y[0], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 0.0), frame.z[0], 0.01);
 
-            // Frame 0, last atom (222)
-            try std.testing.expectApproxEqAbs(@as(f32, -5.777), frame.x[222], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, -10.358), frame.y[222], 0.01);
-            try std.testing.expectApproxEqAbs(@as(f32, -2.24), frame.z[222], 0.01);
-
-            // Time variable present (all zeros in this file)
-            try std.testing.expectApproxEqAbs(@as(f32, 0.0), frame.time, 0.001);
+            // Frame 0, last atom (21)
+            try std.testing.expectApproxEqAbs(@as(f32, 6.360), frame.x[21], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, 8.648), frame.y[21], 0.01);
+            try std.testing.expectApproxEqAbs(@as(f32, -0.890), frame.z[21], 0.01);
         }
         frame_count += 1;
     }
-    try std.testing.expectEqual(@as(usize, 101), frame_count);
+    try std.testing.expectEqual(@as(usize, 3), frame_count);
 }
 
 test "invalid nc file rejected" {
