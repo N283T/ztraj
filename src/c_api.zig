@@ -21,6 +21,8 @@ const mmcif_mod = @import("io/mmcif.zig");
 const xtc_mod = @import("io/xtc.zig");
 const trr_mod = @import("io/trr.zig");
 const dcd_mod = @import("io/dcd.zig");
+const prmtop_mod = @import("io/prmtop.zig");
+const nc_mod = @import("io/nc.zig");
 const hbonds_mod = @import("analysis/hbonds.zig");
 const contacts_mod = @import("analysis/contacts.zig");
 const rdf_mod = @import("analysis/rdf.zig");
@@ -547,9 +549,10 @@ export fn ztraj_load_pdb(
 }
 
 /// Get number of atoms from a loaded structure. Returns 0 on invalid handle.
+/// Uses topology atom count (correct for both structure files and topology-only formats).
 export fn ztraj_get_n_atoms(handle: ?*anyopaque) callconv(.c) usize {
     const h = castStructureHandle(handle) orelse return 0;
-    return h.parse_result.frame.nAtoms();
+    return h.parse_result.topology.atoms.len;
 }
 
 /// Copy coordinates from a loaded structure into caller-owned buffers.
@@ -711,6 +714,55 @@ export fn ztraj_load_mmcif(
     };
     handle.* = .{
         .parse_result = parse_result,
+        .masses = masses,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Load an AMBER PRMTOP file and return an opaque structure handle.
+///
+/// prmtop is topology-only (no coordinates). The returned handle has
+/// zero-length coordinate arrays but valid topology, masses, and charges.
+/// The handle must be freed with ztraj_free_structure().
+export fn ztraj_load_prmtop(
+    path: [*:0]const u8,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+        return ZTRAJ_ERROR_FILE_IO;
+    };
+    defer c_allocator.free(data);
+
+    var topo = prmtop_mod.parseTopology(c_allocator, data) catch |err| {
+        return switch (err) {
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_PARSE,
+        };
+    };
+    errdefer topo.deinit();
+
+    // Wrap in ParseResult with empty frame (prmtop has no coordinates)
+    var frame = types.Frame.init(c_allocator, 0) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    errdefer frame.deinit();
+
+    const masses = topo.masses(c_allocator) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    errdefer c_allocator.free(masses);
+
+    const handle = c_allocator.create(StructureHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .parse_result = .{ .topology = topo, .frame = frame },
         .masses = masses,
         .allocator = c_allocator,
     };
@@ -1025,6 +1077,111 @@ export fn ztraj_close_dcd(handle: ?*anyopaque) callconv(.c) void {
 }
 
 // =============================================================================
+// I/O: AMBER NetCDF Streaming Reader (opaque handle)
+// =============================================================================
+
+const NC_MAGIC: u64 = 0xABCD_EFAB_CDEF_ABCD;
+
+const NcHandle = struct {
+    magic: u64 = NC_MAGIC,
+    reader: nc_mod.NcReader,
+    allocator: std.mem.Allocator,
+
+    fn deinit(self: *NcHandle) void {
+        self.magic = 0;
+        self.reader.deinit();
+        self.allocator.destroy(self);
+    }
+};
+
+fn castNcHandle(handle: ?*anyopaque) ?*NcHandle {
+    const h: *NcHandle = @ptrCast(@alignCast(handle orelse return null));
+    if (h.magic != NC_MAGIC) return null;
+    return h;
+}
+
+/// Open an AMBER NetCDF file for streaming frame-by-frame reading.
+///
+/// `n_atoms_out` receives the number of atoms per frame.
+/// The handle must be closed with ztraj_close_nc().
+export fn ztraj_open_nc(
+    path: [*:0]const u8,
+    n_atoms_out: *usize,
+    handle_out: *?*anyopaque,
+) callconv(.c) c_int {
+    handle_out.* = null;
+
+    const path_slice = std.mem.sliceTo(path, 0);
+    var reader = nc_mod.NcReader.open(c_allocator, path_slice) catch |err| {
+        return switch (err) {
+            nc_mod.NcError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
+            nc_mod.NcError.InvalidMagic,
+            nc_mod.NcError.BadVersion,
+            nc_mod.NcError.NotAmberConvention,
+            nc_mod.NcError.MissingVariable,
+            nc_mod.NcError.BadDimension,
+            => ZTRAJ_ERROR_PARSE,
+            nc_mod.NcError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+    errdefer reader.deinit();
+
+    n_atoms_out.* = reader.nAtoms();
+
+    const handle = c_allocator.create(NcHandle) catch {
+        return ZTRAJ_ERROR_OUT_OF_MEMORY;
+    };
+    handle.* = .{
+        .reader = reader,
+        .allocator = c_allocator,
+    };
+
+    handle_out.* = @ptrCast(handle);
+    return ZTRAJ_OK;
+}
+
+/// Read the next NetCDF frame into caller-owned buffers.
+///
+/// Returns ZTRAJ_OK on success, ZTRAJ_ERROR_EOF at end of file.
+/// Coordinates are in angstroms. `x`, `y`, `z` must have at least n_atoms elements.
+export fn ztraj_read_nc_frame(
+    handle: ?*anyopaque,
+    x: [*]f32,
+    y: [*]f32,
+    z: [*]f32,
+    time: *f32,
+    step: *i32,
+) callconv(.c) c_int {
+    const h = castNcHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
+
+    const frame_ptr = h.reader.next() catch |err| {
+        return switch (err) {
+            nc_mod.NcError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
+    };
+
+    if (frame_ptr) |frame| {
+        const n = frame.nAtoms();
+        @memcpy(x[0..n], frame.x);
+        @memcpy(y[0..n], frame.y);
+        @memcpy(z[0..n], frame.z);
+        time.* = frame.time;
+        step.* = frame.step;
+        return ZTRAJ_OK;
+    } else {
+        return ZTRAJ_ERROR_EOF;
+    }
+}
+
+/// Close a NetCDF reader handle. Safe to call with null.
+export fn ztraj_close_nc(handle: ?*anyopaque) callconv(.c) void {
+    const h = castNcHandle(handle) orelse return;
+    h.deinit();
+}
+
+// =============================================================================
 // Analysis: RDF
 // =============================================================================
 
@@ -1120,7 +1277,7 @@ export fn ztraj_detect_hbonds(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
@@ -1189,7 +1346,7 @@ export fn ztraj_compute_contacts(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     if (cutoff <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const zig_scheme: contacts_mod.Scheme = switch (scheme) {
@@ -1248,7 +1405,7 @@ export fn ztraj_compute_sasa(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_points == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (probe_radius <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
@@ -1495,7 +1652,7 @@ export fn ztraj_make_molecules_whole(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_OK;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const b = parseBox(box);
     pbc_mod.makeMoleculesWhole(c_allocator, x[0..n_atoms], y[0..n_atoms], z[0..n_atoms], h.parse_result.topology, b) catch |err| {

@@ -162,6 +162,67 @@ def load_mmcif(path: str | Path) -> Structure:
     return _load_structure(get_lib().ztraj_load_mmcif, path, "load_mmcif")
 
 
+def load_prmtop(path: str | Path) -> Structure:
+    """Load an AMBER PRMTOP topology file and return a Structure.
+
+    prmtop files contain topology only (no coordinates). The returned
+    Structure has an empty coords array (shape (0, 3)). Use with a
+    trajectory reader (e.g. NcReader) to get coordinates.
+    """
+    ffi = get_ffi()
+    lib = get_lib()
+
+    path_bytes = str(path).encode("utf-8")
+    handle_ptr = ffi.new("void**")
+
+    _check(lib.ztraj_load_prmtop(path_bytes, handle_ptr), f"load_prmtop({path})")
+    handle = handle_ptr[0]
+    if handle == ffi.NULL:
+        raise ZtrajError(f"load_prmtop({path}): returned success but handle is null")
+
+    try:
+        n_atoms = lib.ztraj_get_n_atoms(handle)
+
+        # Masses
+        masses = np.empty(n_atoms, dtype=np.float64)
+        _check(lib.ztraj_get_masses(handle, _ptr_f64(masses)))
+
+        # Atom names (4 bytes each)
+        name_buf = ffi.new(f"char[{n_atoms * 4}]")
+        _check(lib.ztraj_get_atom_names(handle, name_buf))
+        atom_names = [
+            ffi.string(name_buf + i * 4, 4).decode("utf-8").strip() for i in range(n_atoms)
+        ]
+
+        # Residue names (5 bytes each, per-atom)
+        res_buf = ffi.new(f"char[{n_atoms * 5}]")
+        _check(lib.ztraj_get_residue_names(handle, res_buf))
+        residue_names = [
+            ffi.string(res_buf + i * 5, 5).decode("utf-8").strip() for i in range(n_atoms)
+        ]
+
+        # Residue IDs
+        resids = np.empty(n_atoms, dtype=np.int32)
+        _check(lib.ztraj_get_resids(handle, _ptr_i32(resids)))
+
+    finally:
+        lib.ztraj_free_structure(handle)
+
+    # prmtop has no coordinates — return empty array
+    coords = np.empty((0, 3), dtype=np.float32)
+
+    return Structure(
+        coords=coords,
+        masses=masses,
+        atom_names=atom_names,
+        residue_names=residue_names,
+        resids=resids,
+        n_atoms=n_atoms,
+        _path=str(path),
+        _loader="ztraj_load_prmtop",
+    )
+
+
 class XtcReader:
     """Streaming XTC trajectory reader (context manager).
 
@@ -382,6 +443,27 @@ def open_dcd(path: str | Path, n_atoms: int) -> DcdReader:
     return DcdReader(path, n_atoms)
 
 
+class NcReader(_TrajectoryReader):
+    """Streaming AMBER NetCDF trajectory reader (context manager).
+
+    Usage::
+
+        with pyztraj.open_nc("traj.nc", n_atoms) as reader:
+            for frame in reader:
+                print(frame.time, frame.coords.shape)
+    """
+
+    def __init__(self, path: str | Path, n_atoms: int) -> None:
+        super().__init__(
+            path, n_atoms, "ztraj_open_nc", "ztraj_read_nc_frame", "ztraj_close_nc", "nc"
+        )
+
+
+def open_nc(path: str | Path, n_atoms: int) -> NcReader:
+    """Open an AMBER NetCDF trajectory file for streaming frame-by-frame reading."""
+    return NcReader(path, n_atoms)
+
+
 # ============================================================================
 # Structure writers
 # ============================================================================
@@ -424,6 +506,12 @@ def _write_structure(
     lib = get_lib()
 
     if coords is None:
+        if structure.coords.shape[0] == 0:
+            msg = (
+                f"{fn_name}: structure has no coordinates (topology-only format like prmtop). "
+                "Pass explicit coords from a trajectory reader."
+            )
+            raise ValueError(msg)
         coords = structure.coords
     coords = np.ascontiguousarray(coords, dtype=np.float32)
 
