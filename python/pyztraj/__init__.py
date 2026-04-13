@@ -73,6 +73,7 @@ __all__ = [
     "TrrReader",
     "TrrWriter",
     "DcdReader",
+    "NcReader",
     "ZtrajError",
     "analyze_all",
     "compute_angles",
