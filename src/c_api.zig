@@ -739,8 +739,11 @@ export fn ztraj_load_prmtop(
     };
     defer c_allocator.free(data);
 
-    var topo = prmtop_mod.parseTopology(c_allocator, data) catch {
-        return ZTRAJ_ERROR_PARSE;
+    var topo = prmtop_mod.parseTopology(c_allocator, data) catch |err| {
+        return switch (err) {
+            error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_PARSE,
+        };
     };
     errdefer topo.deinit();
 
@@ -1152,8 +1155,11 @@ export fn ztraj_read_nc_frame(
 ) callconv(.c) c_int {
     const h = castNcHandle(handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
 
-    const frame_ptr = h.reader.next() catch {
-        return ZTRAJ_ERROR_FILE_IO;
+    const frame_ptr = h.reader.next() catch |err| {
+        return switch (err) {
+            nc_mod.NcError.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
+            else => ZTRAJ_ERROR_FILE_IO,
+        };
     };
 
     if (frame_ptr) |frame| {
@@ -1271,7 +1277,7 @@ export fn ztraj_detect_hbonds(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
@@ -1340,7 +1346,7 @@ export fn ztraj_compute_contacts(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     if (cutoff <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const zig_scheme: contacts_mod.Scheme = switch (scheme) {
@@ -1399,7 +1405,7 @@ export fn ztraj_compute_sasa(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_ERROR_INVALID_INPUT;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_points == 0) return ZTRAJ_ERROR_INVALID_INPUT;
     if (probe_radius <= 0.0) return ZTRAJ_ERROR_INVALID_INPUT;
 
@@ -1646,7 +1652,7 @@ export fn ztraj_make_molecules_whole(
 ) callconv(.c) c_int {
     const h = castStructureHandle(structure_handle) orelse return ZTRAJ_ERROR_INVALID_INPUT;
     if (n_atoms == 0) return ZTRAJ_OK;
-    if (n_atoms != h.parse_result.frame.nAtoms()) return ZTRAJ_ERROR_INVALID_INPUT;
+    if (n_atoms != h.parse_result.topology.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
 
     const b = parseBox(box);
     pbc_mod.makeMoleculesWhole(c_allocator, x[0..n_atoms], y[0..n_atoms], z[0..n_atoms], h.parse_result.topology, b) catch |err| {

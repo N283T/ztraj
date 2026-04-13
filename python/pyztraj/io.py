@@ -506,6 +506,12 @@ def _write_structure(
     lib = get_lib()
 
     if coords is None:
+        if structure.coords.shape[0] == 0:
+            msg = (
+                f"{fn_name}: structure has no coordinates (topology-only format like prmtop). "
+                "Pass explicit coords from a trajectory reader."
+            )
+            raise ValueError(msg)
         coords = structure.coords
     coords = np.ascontiguousarray(coords, dtype=np.float32)
 
