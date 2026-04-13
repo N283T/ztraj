@@ -337,7 +337,7 @@ pub const NcReader = struct {
         {
             const offset = self.coords_var.offset + fi * self.rec_size;
             self.file.seekTo(offset) catch return NcError.ReadError;
-            readExact(self.file,self.coord_buf) catch return NcError.ReadError;
+            readExact(self.file, self.coord_buf) catch return NcError.ReadError;
 
             // Convert AOS big-endian float32 → SOA native f32
             const n: usize = self.n_atoms;
@@ -354,7 +354,7 @@ pub const NcReader = struct {
             const offset = tv.offset + fi * self.rec_size;
             self.file.seekTo(offset) catch return NcError.ReadError;
             var buf: [4]u8 = undefined;
-            readExact(self.file,&buf) catch return NcError.ReadError;
+            readExact(self.file, &buf) catch return NcError.ReadError;
             self.frame.time = readBEf32(&buf);
         } else {
             self.frame.time = 0.0;
@@ -366,12 +366,12 @@ pub const NcReader = struct {
                 const cl_offset = cl.offset + fi * self.rec_size;
                 self.file.seekTo(cl_offset) catch return NcError.ReadError;
                 var lbuf: [24]u8 = undefined; // 3 * f64
-                readExact(self.file,&lbuf) catch return NcError.ReadError;
+                readExact(self.file, &lbuf) catch return NcError.ReadError;
 
                 const ca_offset = ca.offset + fi * self.rec_size;
                 self.file.seekTo(ca_offset) catch return NcError.ReadError;
                 var abuf: [24]u8 = undefined;
-                readExact(self.file,&abuf) catch return NcError.ReadError;
+                readExact(self.file, &abuf) catch return NcError.ReadError;
 
                 const a: f32 = @floatCast(readBEf64(lbuf[0..8]));
                 const b: f32 = @floatCast(readBEf64(lbuf[8..16]));
