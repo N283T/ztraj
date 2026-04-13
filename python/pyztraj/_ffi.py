@@ -92,6 +92,15 @@ _CDEF = """
                              float* time, int32_t* step);
     void ztraj_close_dcd(void* handle);
 
+    // I/O: AMBER PRMTOP
+    int ztraj_load_prmtop(const char* path, void** handle_out);
+
+    // I/O: AMBER NetCDF
+    int ztraj_open_nc(const char* path, size_t* n_atoms_out, void** handle_out);
+    int ztraj_read_nc_frame(void* handle, float* x, float* y, float* z,
+                            float* time, int32_t* step);
+    void ztraj_close_nc(void* handle);
+
     // Analysis: RDF
     int ztraj_rdf(const float* sel1_x, const float* sel1_y, const float* sel1_z,
                   size_t n_sel1,
