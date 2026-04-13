@@ -1,7 +1,7 @@
 .{
     .fingerprint = 0x17e956260cdc6d81,
     .name = .ztraj,
-    .version = "0.6.1",
+    .version = "0.6.2",
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .zxdrfile = .{

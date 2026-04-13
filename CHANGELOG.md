@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.1] - 2026-04-13
+## [0.6.2] - 2026-04-13
 
 ### Added
 - #90 AMBER PRMTOP topology parser (.prmtop, .parm7, .top)
