@@ -138,6 +138,17 @@ pub const Topology = struct {
     bonds: []Bond,
     allocator: std.mem.Allocator,
 
+    /// Per-atom partial charges (electron charge units).
+    /// Only populated by formats that carry charges (e.g. AMBER prmtop).
+    /// null when the source format has no charge data.
+    charges: ?[]f32 = null,
+
+    /// Per-atom masses from the force field (daltons).
+    /// More accurate than element-derived masses for united-atom models,
+    /// virtual sites, or isotope-labelled systems.
+    /// null when the source format has no explicit mass data.
+    explicit_masses: ?[]f32 = null,
+
     /// Allocate all slices with the given sizes.
     /// Memory is uninitialized — callers must fill every element before use.
     pub fn init(allocator: std.mem.Allocator, sizes: TopologySizes) !Topology {
@@ -164,6 +175,8 @@ pub const Topology = struct {
 
     /// Free all slices owned by this topology.
     pub fn deinit(self: *Topology) void {
+        if (self.charges) |c| self.allocator.free(c);
+        if (self.explicit_masses) |m| self.allocator.free(m);
         self.allocator.free(self.atoms);
         self.allocator.free(self.residues);
         self.allocator.free(self.chains);
@@ -194,11 +207,19 @@ pub const Topology = struct {
     }
 
     /// Build a flat array of atomic masses (daltons) in atom-index order.
+    /// Uses explicit force-field masses when available, otherwise derives
+    /// from the element's standard atomic weight.
     /// Caller owns the returned slice and must free it with the same allocator.
     pub fn masses(self: Topology, allocator: std.mem.Allocator) ![]f64 {
         const result = try allocator.alloc(f64, self.atoms.len);
-        for (self.atoms, 0..) |atom, i| {
-            result[i] = atom.element.mass();
+        if (self.explicit_masses) |em| {
+            for (em, 0..) |m, i| {
+                result[i] = @floatCast(m);
+            }
+        } else {
+            for (self.atoms, 0..) |atom, i| {
+                result[i] = atom.element.mass();
+            }
         }
         return result;
     }

@@ -290,6 +290,34 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
     }
 
     // -------------------------------------------------------------------------
+    // Parse CHARGE (optional — AMBER charges / 18.2223 = electron charge units)
+    // -------------------------------------------------------------------------
+    var charge_fields: ?[][]const u8 = null;
+    defer if (charge_fields) |cf| allocator.free(cf);
+
+    if (sections.get("CHARGE")) |charge_sec| {
+        const charge_reader = SectionData{
+            .sec_data = data[charge_sec.data_start..@min(charge_sec.data_end, data.len)],
+            .width = charge_sec.format.width,
+        };
+        charge_fields = try charge_reader.items(allocator, n_atoms);
+    }
+
+    // -------------------------------------------------------------------------
+    // Parse MASS (optional — daltons)
+    // -------------------------------------------------------------------------
+    var mass_fields: ?[][]const u8 = null;
+    defer if (mass_fields) |mf| allocator.free(mf);
+
+    if (sections.get("MASS")) |mass_sec| {
+        const mass_reader = SectionData{
+            .sec_data = data[mass_sec.data_start..@min(mass_sec.data_end, data.len)],
+            .width = mass_sec.format.width,
+        };
+        mass_fields = try mass_reader.items(allocator, n_atoms);
+    }
+
+    // -------------------------------------------------------------------------
     // Parse RESIDUE_LABEL
     // -------------------------------------------------------------------------
     const res_label_sec = sections.get("RESIDUE_LABEL") orelse return ParseError.MissingSections;
@@ -430,6 +458,33 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
         };
     }
 
+    // Fill charges (AMBER units / 18.2223 → electron charge units)
+    if (charge_fields) |cf| {
+        if (cf.len >= n_atoms) {
+            const charges = try allocator.alloc(f32, n_atoms);
+            errdefer allocator.free(charges);
+            for (0..n_atoms) |ai| {
+                const field = std.mem.trim(u8, cf[ai], " ");
+                const amber_charge = std.fmt.parseFloat(f64, field) catch 0.0;
+                charges[ai] = @floatCast(amber_charge / 18.2223);
+            }
+            topology.charges = charges;
+        }
+    }
+
+    // Fill explicit masses (daltons, directly usable)
+    if (mass_fields) |mf| {
+        if (mf.len >= n_atoms) {
+            const em = try allocator.alloc(f32, n_atoms);
+            errdefer allocator.free(em);
+            for (0..n_atoms) |ai| {
+                const field = std.mem.trim(u8, mf[ai], " ");
+                em[ai] = @floatCast(std.fmt.parseFloat(f64, field) catch 0.0);
+            }
+            topology.explicit_masses = em;
+        }
+    }
+
     try topology.validate();
     return topology;
 }
@@ -521,6 +576,32 @@ test "parse alanine dipeptide implicit prmtop" {
     try std.testing.expectEqual(elem.Element.O, topo.atoms[5].element); // O
     try std.testing.expectEqual(elem.Element.N, topo.atoms[6].element); // N
     try std.testing.expectEqual(elem.Element.H, topo.atoms[7].element); // H
+
+    // Check charges are populated (AMBER charge / 18.2223)
+    try std.testing.expect(topo.charges != null);
+    const charges = topo.charges.?;
+    try std.testing.expectEqual(@as(usize, 22), charges.len);
+    // HH31: AMBER charge 2.04636429E+00 / 18.2223 ≈ 0.1123
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1123), charges[0], 0.001);
+    // O: AMBER charge -1.03484442E+01 / 18.2223 ≈ -0.5679
+    try std.testing.expectApproxEqAbs(@as(f32, -0.5679), charges[5], 0.001);
+
+    // Check explicit masses are populated
+    try std.testing.expect(topo.explicit_masses != null);
+    const em = topo.explicit_masses.?;
+    try std.testing.expectEqual(@as(usize, 22), em.len);
+    // HH31: mass 1.008
+    try std.testing.expectApproxEqAbs(@as(f32, 1.008), em[0], 0.001);
+    // CH3 (carbon): mass 12.01
+    try std.testing.expectApproxEqAbs(@as(f32, 12.01), em[1], 0.001);
+    // O: mass 16.0
+    try std.testing.expectApproxEqAbs(@as(f32, 16.0), em[5], 0.01);
+
+    // Verify masses() prefers explicit_masses
+    const mass_arr = try topo.masses(allocator);
+    defer allocator.free(mass_arr);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.008), mass_arr[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 12.01), mass_arr[1], 0.001);
 }
 
 test "parse cpptraj prmtop with ATOMIC_NUMBER" {
