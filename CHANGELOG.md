@@ -15,6 +15,10 @@
   - `pyztraj.load_prmtop()`: topology loading with masses and charges
   - `pyztraj.open_nc()` / `NcReader`: streaming NetCDF trajectory reader
   - C API: `ztraj_load_prmtop`, `ztraj_open_nc`, `ztraj_read_nc_frame`, `ztraj_close_nc`
+- #96 AMBER NetCDF trajectory writer (.nc)
+  - NcWriter with open/writeFrame/close API, orthogonal and triclinic box support
+  - CLI `ztraj convert` supports .nc output (NC ↔ XTC/TRR/DCD)
+  - Python `NcWriter` class and C API (`ztraj_open_nc_writer`, etc.)
 
 ### Changed
 - Topology gains optional `charges` and `explicit_masses` fields (null when absent)
