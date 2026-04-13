@@ -47,11 +47,16 @@ pub fn isGro(path: []const u8) bool {
     return endsWithCI(path, ".gro");
 }
 
+pub fn isPrmtop(path: []const u8) bool {
+    return endsWithCI(path, ".prmtop") or endsWithCI(path, ".parm7") or endsWithCI(path, ".top");
+}
+
 // ============================================================================
 // Topology loading
 // ============================================================================
 
-/// Load topology + first frame from a PDB, CIF, or GRO file.
+/// Load topology + first frame from a structure or topology file.
+/// Supported formats: PDB, CIF/mmCIF, GRO, PRMTOP/PARM7.
 /// Returns a ParseResult; caller must call .deinit().
 pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.ParseResult {
     const data = try std.fs.cwd().readFileAlloc(allocator, path, 512 * 1024 * 1024);
@@ -63,8 +68,18 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
         return io.mmcif.parse(allocator, data);
     } else if (isGro(path)) {
         return io.gro.parse(allocator, data);
+    } else if (isPrmtop(path)) {
+        // PRMTOP is topology-only — wrap in ParseResult with a zero-atom frame
+        const topo = try io.prmtop.parseTopology(allocator, data);
+        errdefer {
+            var t = topo;
+            t.deinit();
+        }
+        var frame = try types.Frame.init(allocator, 0);
+        errdefer frame.deinit();
+        return types.ParseResult{ .topology = topo, .frame = frame };
     } else {
-        printStderr("error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro)\n");
+        printStderr("error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro, .prmtop, .parm7, .top)\n");
         return error.UnsupportedFormat;
     }
 }
