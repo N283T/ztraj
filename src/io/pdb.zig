@@ -669,12 +669,12 @@ test "write PDB round-trip" {
     defer result.deinit();
 
     // Write to buffer
-    var buf = std.ArrayList(u8).empty;
-    defer buf.deinit(allocator);
-    try write(buf.writer(allocator), result.topology, result.frame);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try write(&aw.writer, result.topology, result.frame);
 
     // Parse the written output
-    var result2 = try parse(allocator, buf.items);
+    var result2 = try parse(allocator, aw.written());
     defer result2.deinit();
 
     // Compare

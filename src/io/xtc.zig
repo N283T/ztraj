@@ -26,7 +26,7 @@ pub const XtcReadError = error{
 ///
 /// Usage:
 ///
-///   var reader = try XtcReader.open(allocator, "trajectory.xtc");
+///   var reader = try XtcReader.open(io, allocator, "trajectory.xtc");
 ///   defer reader.deinit();
 ///
 ///   while (try reader.next()) |frame| {
@@ -130,7 +130,7 @@ pub const XtcReader = struct {
 ///
 /// Usage:
 ///
-///   var writer = try XtcWriter.open(allocator, "trajectory.xtc", n_atoms);
+///   var writer = try XtcWriter.open(io, allocator, "trajectory.xtc", n_atoms);
 ///   defer writer.deinit();
 ///
 ///   try writer.writeFrame(frame);
@@ -206,17 +206,24 @@ pub const XtcWriter = struct {
 // Tests
 // ============================================================================
 
+fn testIo() std.Io {
+    const t = struct {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+    };
+    return t.threaded.io();
+}
+
 test "XtcReader compiles and can be deinitialized with no file" {
     // Verify the struct layout is correct without requiring a real XTC file.
     // Structural integrity only — open() will fail gracefully on missing file.
     const allocator = std.testing.allocator;
 
-    const result = XtcReader.open(allocator, "nonexistent_file.xtc");
+    const result = XtcReader.open(testIo(), allocator, "nonexistent_file.xtc");
     try std.testing.expectError(XtcReadError.FileNotFound, result);
 }
 
 test "XtcReader open error is FileNotFound for missing path" {
     const allocator = std.testing.allocator;
-    const err = XtcReader.open(allocator, "/no/such/path/trajectory.xtc");
+    const err = XtcReader.open(testIo(), allocator, "/no/such/path/trajectory.xtc");
     try std.testing.expectError(XtcReadError.FileNotFound, err);
 }

@@ -77,7 +77,7 @@ const VarInfo = struct {
 ///
 /// Usage:
 ///
-///   var reader = try NcReader.open(testIo(), allocator, "trajectory.nc");
+///   var reader = try NcReader.open(io, allocator, "trajectory.nc");
 ///   defer reader.deinit();
 ///
 ///   while (try reader.next()) |frame| {
@@ -505,7 +505,7 @@ pub const NcWriteError = error{
 ///
 /// Usage:
 ///
-///   var writer = try NcWriter.open(testIo(), allocator, "output.nc", 100);
+///   var writer = try NcWriter.open(io, allocator, "output.nc", 100);
 ///   defer writer.deinit();
 ///   for (frames) |frame| try writer.writeFrame(frame);
 ///   try writer.close();

@@ -44,7 +44,7 @@ const DcdHeader = struct {
 ///
 /// Usage:
 ///
-///   var reader = try DcdReader.open(allocator, "trajectory.dcd");
+///   var reader = try DcdReader.open(io, allocator, "trajectory.dcd");
 ///   defer reader.deinit();
 ///
 ///   while (try reader.next()) |frame| {
@@ -429,22 +429,29 @@ fn readHeader(reader: *std.Io.File.Reader, hdr: *DcdHeader) !void {
 // Tests
 // ============================================================================
 
+fn testIo() std.Io {
+    const t = struct {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+    };
+    return t.threaded.io();
+}
+
 test "DcdReader open returns FileNotFound for missing path" {
     const allocator = std.testing.allocator;
-    const result = DcdReader.open(allocator, "nonexistent.dcd");
+    const result = DcdReader.open(testIo(), allocator, "nonexistent.dcd");
     try std.testing.expectError(DcdError.FileNotFound, result);
 }
 
 test "DcdReader open returns FileNotFound for nonexistent path" {
     const allocator = std.testing.allocator;
-    const err = DcdReader.open(allocator, "/no/such/file/trajectory.dcd");
+    const err = DcdReader.open(testIo(), allocator, "/no/such/file/trajectory.dcd");
     try std.testing.expectError(DcdError.FileNotFound, err);
 }
 
 test "DcdReader reads existing DCD file" {
     const allocator = std.testing.allocator;
 
-    var reader = DcdReader.open(allocator, "test_data/1l2y.dcd") catch |err| {
+    var reader = DcdReader.open(testIo(), allocator, "test_data/1l2y.dcd") catch |err| {
         if (err == DcdError.FileNotFound) return; // Skip if test data not present.
         return err;
     };
@@ -471,7 +478,7 @@ test "DcdReader reads existing DCD file" {
 test "DcdReader reads all frames from DCD file" {
     const allocator = std.testing.allocator;
 
-    var reader = DcdReader.open(allocator, "test_data/1l2y.dcd") catch |err| {
+    var reader = DcdReader.open(testIo(), allocator, "test_data/1l2y.dcd") catch |err| {
         if (err == DcdError.FileNotFound) return;
         return err;
     };

@@ -31,8 +31,11 @@ pub fn mmapFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Map
     if (size == 0) return .{ .data = &.{}, .allocator = if (is_windows) allocator else {} };
 
     if (is_windows) {
-        const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(size));
-        return .{ .data = data, .allocator = allocator };
+        // Read from the already-open handle to avoid a TOCTOU re-open.
+        const data = try allocator.alloc(u8, size);
+        errdefer allocator.free(data);
+        const n = try file.readPositionalAll(io, data, 0);
+        return .{ .data = data[0..n], .allocator = allocator };
     } else {
         const mapped = try std.posix.mmap(
             null,

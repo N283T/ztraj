@@ -27,7 +27,7 @@ pub const TrrReadError = error{
 ///
 /// Usage:
 ///
-///   var reader = try TrrReader.open(allocator, "trajectory.trr");
+///   var reader = try TrrReader.open(io, allocator, "trajectory.trr");
 ///   defer reader.deinit();
 ///
 ///   while (try reader.next()) |frame| {
@@ -131,7 +131,7 @@ pub const TrrReader = struct {
 ///
 /// Usage:
 ///
-///   var writer = try TrrWriter.open(allocator, "trajectory.trr", n_atoms);
+///   var writer = try TrrWriter.open(io, allocator, "trajectory.trr", n_atoms);
 ///   defer writer.deinit();
 ///
 ///   try writer.writeFrame(frame);
@@ -213,8 +213,15 @@ pub const TrrWriter = struct {
 // Tests
 // ============================================================================
 
+fn testIo() std.Io {
+    const t = struct {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+    };
+    return t.threaded.io();
+}
+
 test "TrrReader: missing file returns FileNotFound" {
     const allocator = std.testing.allocator;
-    const result = TrrReader.open(allocator, "nonexistent_file.trr");
+    const result = TrrReader.open(testIo(), allocator, "nonexistent_file.trr");
     try std.testing.expectError(TrrReadError.FileNotFound, result);
 }
