@@ -279,7 +279,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     // Line 1: Title
     // -------------------------------------------------------------------------
     const title_line = lines.next() orelse return ParseError.InvalidFormat;
-    const title = std.mem.trimRight(u8, title_line, "\r");
+    const title = std.mem.trimEnd(u8, title_line, "\r");
     const frame_time = parseTime(title);
 
     // -------------------------------------------------------------------------
@@ -296,7 +296,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     // -------------------------------------------------------------------------
     // Pass 1: collect raw atoms
     // -------------------------------------------------------------------------
-    var raw_atoms = std.ArrayListUnmanaged(RawAtom){};
+    var raw_atoms = std.ArrayList(RawAtom).empty;
     defer raw_atoms.deinit(allocator);
 
     try raw_atoms.ensureTotalCapacity(allocator, n_atoms_expected);
@@ -306,7 +306,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
 
     var atom_count: u32 = 0;
     while (lines.next()) |line_raw| {
-        const line = std.mem.trimRight(u8, line_raw, "\r");
+        const line = std.mem.trimEnd(u8, line_raw, "\r");
 
         if (atom_count >= n_atoms_expected) {
             // This is the box vector line (or trailing content)
@@ -829,12 +829,12 @@ test "write GRO round-trip" {
     defer result.deinit();
 
     // Write to buffer
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    try write(buf.writer(allocator), result.topology, result.frame);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try write(&aw.writer, result.topology, result.frame);
 
     // Parse the written output
-    var result2 = try parse(allocator, buf.items);
+    var result2 = try parse(allocator, aw.written());
     defer result2.deinit();
 
     // Compare

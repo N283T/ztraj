@@ -2,15 +2,15 @@
     .fingerprint = 0x17e956260cdc6d81,
     .name = .ztraj,
     .version = "0.6.2",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zxdrfile = .{
-            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.2.0#4f6b7853efc747a3ac7d7c94bb4302114b12c916",
-            .hash = "zxdrfile-0.2.0-JIaQ9hMJAgCg3RxOMkEd_n0mQX_MBry33wBKhZ7I1kwm",
+            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.4.0#47d8c42cff9b098febd1990cc50438c26987f85c",
+            .hash = "zxdrfile-0.4.0-JIaQ9mIfAgAHB9bW-_p9g6_gfd0tyG3-MmA0LYJKB8rb",
         },
         .zsasa = .{
-            .url = "git+https://github.com/N283T/freesasa-zig.git#f76cafbf4f774531f291f8778552ba513bb03e5d",
-            .hash = "zsasa-0.2.4-d7uHxM_KDABCLaSpqZFoO6LCEY_z8oJQD6i_v5eAKGuK",
+            .url = "git+https://github.com/N283T/freesasa-zig.git?ref=v0.2.11#63a9241e965e3f0a9f79519cc9b10a8e431a5eaf",
+            .hash = "zsasa-0.2.11-d7uHxJFhEADTdAgq3DrcSPa2VBMVMZ0jR8Aacdf3cTwb",
         },
     },
     .paths = .{

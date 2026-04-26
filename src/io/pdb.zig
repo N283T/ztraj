@@ -176,12 +176,12 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     // -------------------------------------------------------------------------
     // Pass 1: collect raw atoms and CONECT entries
     // -------------------------------------------------------------------------
-    var raw_atoms = std.ArrayListUnmanaged(RawAtom){};
+    var raw_atoms = std.ArrayList(RawAtom).empty;
     defer raw_atoms.deinit(allocator);
 
     // CONECT: list of (serial_i, serial_j) pairs
     const ConectPair = struct { i: u32, j: u32 };
-    var conect_pairs = std.ArrayListUnmanaged(ConectPair){};
+    var conect_pairs = std.ArrayList(ConectPair).empty;
     defer conect_pairs.deinit(allocator);
 
     var first_alt_loc: u8 = 0; // 0 = not yet set
@@ -295,7 +295,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     const n_atoms: u32 = @intCast(raw_atoms.items.len);
 
     // Build serial -> atom_index map for CONECT resolution
-    var serial_to_idx = std.AutoHashMapUnmanaged(u32, u32){};
+    var serial_to_idx = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer serial_to_idx.deinit(allocator);
     try serial_to_idx.ensureTotalCapacity(allocator, n_atoms);
     for (raw_atoms.items, 0..) |ra, i| {
@@ -304,7 +304,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
 
     // Deduplicate CONECT bonds
     const BondKey = struct { i: u32, j: u32 };
-    var bond_set = std.AutoHashMapUnmanaged(BondKey, void){};
+    var bond_set = std.AutoHashMapUnmanaged(BondKey, void).empty;
     defer bond_set.deinit(allocator);
     for (conect_pairs.items) |cp| {
         const idx_i = serial_to_idx.get(cp.i) orelse continue;
@@ -669,7 +669,7 @@ test "write PDB round-trip" {
     defer result.deinit();
 
     // Write to buffer
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = std.ArrayList(u8).empty;
     defer buf.deinit(allocator);
     try write(buf.writer(allocator), result.topology, result.frame);
 

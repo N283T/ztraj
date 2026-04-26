@@ -64,8 +64,8 @@ const FortranFormat = struct {
 /// We only need the field width for fixed-width slicing.
 fn parseFortranFormat(fmt_line: []const u8) ?FortranFormat {
     // Find content between parentheses
-    const open = std.mem.indexOfScalar(u8, fmt_line, '(') orelse return null;
-    const close = std.mem.indexOfScalar(u8, fmt_line, ')') orelse return null;
+    const open = std.mem.findScalar(u8, fmt_line, '(') orelse return null;
+    const close = std.mem.findScalar(u8, fmt_line, ')') orelse return null;
     if (close <= open + 1) return null;
     const inner = fmt_line[open + 1 .. close];
 
@@ -120,7 +120,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
     // -------------------------------------------------------------------------
     var lines = std.mem.splitScalar(u8, data, '\n');
     const first_line = lines.next() orelse return ParseError.InvalidFormat;
-    const first_trimmed = std.mem.trimRight(u8, first_line, "\r ");
+    const first_trimmed = std.mem.trimEnd(u8, first_line, "\r ");
     if (!std.mem.startsWith(u8, first_trimmed, "%VERSION")) {
         return ParseError.InvalidFormat;
     }
@@ -145,7 +145,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
     var byte_offset: usize = 0;
 
     while (line_iter.next()) |line| {
-        const trimmed = std.mem.trimRight(u8, line, "\r");
+        const trimmed = std.mem.trimEnd(u8, line, "\r");
         const line_end = byte_offset + line.len + 1; // +1 for \n
 
         if (std.mem.startsWith(u8, trimmed, "%FLAG")) {
@@ -162,8 +162,8 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
                 }
             }
             // Extract flag name
-            const rest = std.mem.trimLeft(u8, trimmed[5..], " ");
-            const flag_end = std.mem.indexOfAny(u8, rest, " \t") orelse rest.len;
+            const rest = std.mem.trimStart(u8, trimmed[5..], " ");
+            const flag_end = std.mem.findAny(u8, rest, " \t") orelse rest.len;
             current_flag = rest[0..flag_end];
             current_format = null;
             data_start = null;
@@ -207,7 +207,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
         var ptr_lines = std.mem.splitScalar(u8, sec_data, '\n');
         var ptr_idx: usize = 0;
         while (ptr_lines.next()) |pline| {
-            const ptrimmed = std.mem.trimRight(u8, pline, "\r ");
+            const ptrimmed = std.mem.trimEnd(u8, pline, "\r ");
             if (ptrimmed.len == 0) continue;
             if (std.mem.startsWith(u8, ptrimmed, "%")) break;
             const width = pointers_sec.format.width;
@@ -240,7 +240,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
         const Self = @This();
 
         fn items(self: Self, allocator_: std.mem.Allocator, expected: u32) ![][]const u8 {
-            var result = std.ArrayListUnmanaged([]const u8){};
+            var result = std.ArrayList([]const u8).empty;
             errdefer result.deinit(allocator_);
 
             if (expected > 0) {
@@ -249,7 +249,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
 
             var sec_lines = std.mem.splitScalar(u8, self.sec_data, '\n');
             while (sec_lines.next()) |sline| {
-                const strimmed = std.mem.trimRight(u8, sline, "\r");
+                const strimmed = std.mem.trimEnd(u8, sline, "\r");
                 if (strimmed.len == 0) continue;
                 if (std.mem.startsWith(u8, strimmed, "%")) break;
                 var col: usize = 0;
@@ -366,7 +366,7 @@ pub fn parseTopology(allocator: std.mem.Allocator, data: []const u8) !types.Topo
     // Parse bond sections
     // -------------------------------------------------------------------------
     const BondRaw = struct { atom_i: u32, atom_j: u32 };
-    var bonds_list = std.ArrayListUnmanaged(BondRaw){};
+    var bonds_list = std.ArrayList(BondRaw).empty;
     defer bonds_list.deinit(allocator);
     try bonds_list.ensureTotalCapacity(allocator, n_bonds);
 
@@ -544,8 +544,15 @@ test "inferElement atom names" {
     try std.testing.expectEqual(elem.Element.H, inferElement("H1"));
 }
 
+fn testIo() std.Io {
+    const t = struct {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+    };
+    return t.threaded.io();
+}
+
 fn readTestFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    return std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
+    return std.Io.Dir.cwd().readFileAlloc(testIo(), path, allocator, .limited(16 * 1024 * 1024));
 }
 
 test "parse alanine dipeptide implicit prmtop" {

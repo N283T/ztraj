@@ -18,26 +18,25 @@ const parsers = @import("parsers.zig");
 // ============================================================================
 
 /// Write the buffered output to either a file or stdout.
-pub fn flushOutput(buf: []const u8, output_path: ?[]const u8) !void {
+pub fn flushOutput(io: std.Io, buf: []const u8, output_path: ?[]const u8) !void {
     if (output_path) |p| {
-        const file = try std.fs.cwd().createFile(p, .{});
-        defer file.close();
-        try file.writeAll(buf);
+        const file = try std.Io.Dir.cwd().createFile(io, p, .{});
+        defer file.close(io);
+        try file.writeStreamingAll(io, buf);
     } else {
-        const stdout = std.fs.File.stdout();
-        try stdout.writeAll(buf);
+        const stdout = std.Io.File.stdout();
+        try stdout.writeStreamingAll(io, buf);
     }
 }
 
 /// Write a single f64 array in the chosen format (one column).
 pub fn writeScalarSeriesBuf(
     allocator: std.mem.Allocator,
-    buf: *std.ArrayList(u8),
+    w: *std.Io.Writer,
     fmt: output.Format,
     key: []const u8,
     values: []const f64,
 ) !void {
-    const w = buf.writer(allocator);
     switch (fmt) {
         .json => {
             try w.writeAll("{\n  ");
@@ -65,17 +64,17 @@ pub fn writeScalarSeriesBuf(
 // Subcommand: rmsd
 // ============================================================================
 
-pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "rmsd" });
+pub fn runRmsd(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "rmsd" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -114,27 +113,27 @@ pub fn runRmsd(allocator: std.mem.Allocator, args: Args) !void {
     analysis_node.end();
     progress_root.end();
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    try writeScalarSeriesBuf(allocator, &buf, args.format, "rmsd", rmsd_vals);
-    try flushOutput(buf.items, args.output_path);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try writeScalarSeriesBuf(allocator, &aw.writer, args.format, "rmsd", rmsd_vals);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: rmsf
 // ============================================================================
 
-pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "rmsf" });
+pub fn runRmsf(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "rmsf" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -147,18 +146,18 @@ pub fn runRmsf(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(rmsf_vals);
     progress_root.end();
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    try writeScalarSeriesBuf(allocator, &buf, args.format, "rmsf", rmsf_vals);
-    try flushOutput(buf.items, args.output_path);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try writeScalarSeriesBuf(allocator, &aw.writer, args.format, "rmsf", rmsf_vals);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: distances
 // ============================================================================
 
-pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "distances" });
+pub fn runDistances(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "distances" });
 
     const spec = args.pairs_spec orelse {
         std.debug.print("error: --pairs required for distances subcommand\n", .{});
@@ -168,12 +167,12 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(pairs);
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     try parsers.validateIndices(2, pairs, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -209,9 +208,9 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
     }
     const const_headers: []const []const u8 = @ptrCast(headers);
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     switch (args.format) {
         .json => {
@@ -230,15 +229,15 @@ pub fn runDistances(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, const_headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, const_headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: angles
 // ============================================================================
 
-pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "angles" });
+pub fn runAngles(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "angles" });
 
     const spec = args.triplets_spec orelse {
         std.debug.print("error: --triplets required for angles subcommand\n", .{});
@@ -248,12 +247,12 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(triplets);
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     try parsers.validateIndices(3, triplets, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -289,9 +288,9 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
     }
     const const_headers: []const []const u8 = @ptrCast(headers);
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
     switch (args.format) {
         .json => {
             try w.writeAll("{\n");
@@ -309,15 +308,15 @@ pub fn runAngles(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, const_headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, const_headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: dihedrals
 // ============================================================================
 
-pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "dihedrals" });
+pub fn runDihedrals(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "dihedrals" });
 
     const spec = args.quartets_spec orelse {
         std.debug.print("error: --quartets required for dihedrals subcommand\n", .{});
@@ -327,12 +326,12 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
     defer allocator.free(quartets);
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     try parsers.validateIndices(4, quartets, @intCast(parsed.topology.atoms.len));
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -368,9 +367,9 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
     }
     const const_headers: []const []const u8 = @ptrCast(headers);
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
     switch (args.format) {
         .json => {
             try w.writeAll("{\n");
@@ -388,18 +387,18 @@ pub fn runDihedrals(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, const_headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, const_headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: rg
 // ============================================================================
 
-pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "rg" });
+pub fn runRg(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "rg" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
@@ -408,7 +407,7 @@ pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -424,21 +423,21 @@ pub fn runRg(allocator: std.mem.Allocator, args: Args) !void {
     analysis_node.end();
     progress_root.end();
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    try writeScalarSeriesBuf(allocator, &buf, args.format, "rg", rg_vals);
-    try flushOutput(buf.items, args.output_path);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try writeScalarSeriesBuf(allocator, &aw.writer, args.format, "rg", rg_vals);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: center
 // ============================================================================
 
-pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "center" });
+pub fn runCenter(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "center" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
@@ -447,7 +446,7 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -472,9 +471,9 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
     progress_root.end();
 
     const headers = [_][]const u8{ "cx", "cy", "cz" };
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
     switch (args.format) {
         .json => {
             const cx_vals = try allocator.alloc(f64, frames.len);
@@ -496,18 +495,18 @@ pub fn runCenter(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, &headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, &headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: inertia
 // ============================================================================
 
-pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "inertia" });
+pub fn runInertia(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "inertia" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
@@ -516,7 +515,7 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -542,9 +541,9 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
     progress_root.end();
 
     const headers = [_][]const u8{ "I1", "I2", "I3" };
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
     switch (args.format) {
         .json => {
             const mom1 = try allocator.alloc(f64, frames.len);
@@ -566,21 +565,21 @@ pub fn runInertia(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, &headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, &headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: hbonds
 // ============================================================================
 
-pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "hbonds" });
+pub fn runHbonds(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "hbonds" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -593,9 +592,9 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
 
     const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     const analysis_node = progress_root.start("Detecting H-bonds", frames.len);
     switch (args.format) {
@@ -636,21 +635,21 @@ pub fn runHbonds(allocator: std.mem.Allocator, args: Args) !void {
     }
     analysis_node.end();
     progress_root.end();
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: contacts
 // ============================================================================
 
-pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "contacts" });
+pub fn runContacts(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "contacts" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -667,9 +666,9 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
         std.process.exit(1);
     };
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     const analysis_node = progress_root.start("Computing contacts", frames.len);
     switch (args.format) {
@@ -725,15 +724,15 @@ pub fn runContacts(allocator: std.mem.Allocator, args: Args) !void {
     }
     analysis_node.end();
     progress_root.end();
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: rdf
 // ============================================================================
 
-pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "rdf" });
+pub fn runRdf(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "rdf" });
 
     if (args.sel1 == null or args.sel2 == null) {
         std.debug.print("error: --sel1 and --sel2 required for rdf subcommand\n", .{});
@@ -741,7 +740,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
     }
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const idx1 = try parsers.resolveSelection(allocator, parsed.topology, args.sel1);
@@ -749,7 +748,7 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
     const idx2 = try parsers.resolveSelection(allocator, parsed.topology, args.sel2);
     defer if (idx2) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -878,9 +877,9 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
         std.process.exit(1);
     };
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     const headers = [_][]const u8{ "r", "g_r" };
     var all_rows = try allocator.alloc([]const f64, r_vals.len);
@@ -903,24 +902,24 @@ pub fn runRdf(allocator: std.mem.Allocator, args: Args) !void {
         .csv => try output.writeDelimited(w, &headers, all_rows, ','),
         .tsv => try output.writeDelimited(w, &headers, all_rows, '\t'),
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: sasa
 // ============================================================================
 
-pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "sasa" });
+pub fn runSasa(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "sasa" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
     defer if (atom_indices) |ai| allocator.free(ai);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -948,29 +947,29 @@ pub fn runSasa(allocator: std.mem.Allocator, args: Args) !void {
     analysis_node.end();
     progress_root.end();
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    try writeScalarSeriesBuf(allocator, &buf, args.format, "sasa", sasa_vals);
-    try flushOutput(buf.items, args.output_path);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try writeScalarSeriesBuf(allocator, &aw.writer, args.format, "sasa", sasa_vals);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: all (combined analysis)
 // ============================================================================
 
-pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "all" });
+pub fn runAll(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "all" });
 
     // The all command only supports JSON output (multi-metric data
     // doesn't map to flat CSV/TSV)
     if (args.format != .json) {
-        const stderr = std.fs.File.stderr();
-        try stderr.writeAll("error: 'all' command only supports JSON output (--format json)\n");
+        const stderr = std.Io.File.stderr();
+        try stderr.writeStreamingAll(io, "error: 'all' command only supports JSON output (--format json)\n");
         return error.UnsupportedFormat;
     }
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const atom_indices = try parsers.resolveSelection(allocator, parsed.topology, args.select_str);
@@ -979,7 +978,7 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     const masses = try parsed.topology.masses(allocator);
     defer allocator.free(masses);
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -1071,9 +1070,9 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     progress_root.end();
 
     // Write JSON output
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     const n_atoms = if (atom_indices) |ai| ai.len else parsed.topology.atoms.len;
 
@@ -1101,21 +1100,21 @@ pub fn runAll(allocator: std.mem.Allocator, args: Args) !void {
     }
     try w.writeAll("]\n}\n");
 
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: dssp
 // ============================================================================
 
-pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "dssp" });
+pub fn runDssp(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "dssp" });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
@@ -1126,9 +1125,9 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
     const n_threads = if (args.n_threads == 0) (std.Thread.getCpuCount() catch 1) else args.n_threads;
     const config = dssp_mod.DsspConfigT{ .n_threads = n_threads };
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     if (frames.len == 1) {
         // Single frame: output per-residue SS
@@ -1205,7 +1204,7 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
         analysis_node.end();
     }
     progress_root.end();
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
@@ -1215,27 +1214,28 @@ pub fn runDssp(allocator: std.mem.Allocator, args: Args) !void {
 const prot_dih = geometry.protein_dihedrals;
 
 fn runProteinDihedral(
+    io: std.Io,
     allocator: std.mem.Allocator,
     args: Args,
     comptime key: []const u8,
     computeFn: anytype,
 ) !void {
-    const progress_root = std.Progress.start(.{ .root_name = key });
+    const progress_root = std.Progress.start(io, .{ .root_name = key });
 
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
     }
     if (frames.len == 0) return error.NoFrames;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     // Compute for each frame
     const analysis_node = progress_root.start("Computing " ++ key, frames.len);
@@ -1287,39 +1287,39 @@ fn runProteinDihedral(
             }
         },
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
-pub fn runPhi(allocator: std.mem.Allocator, args: Args) !void {
-    return runProteinDihedral(allocator, args, "phi", prot_dih.computePhi);
+pub fn runPhi(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(io, allocator, args, "phi", prot_dih.computePhi);
 }
 
-pub fn runPsi(allocator: std.mem.Allocator, args: Args) !void {
-    return runProteinDihedral(allocator, args, "psi", prot_dih.computePsi);
+pub fn runPsi(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(io, allocator, args, "psi", prot_dih.computePsi);
 }
 
-pub fn runOmega(allocator: std.mem.Allocator, args: Args) !void {
-    return runProteinDihedral(allocator, args, "omega", prot_dih.computeOmega);
+pub fn runOmega(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    return runProteinDihedral(io, allocator, args, "omega", prot_dih.computeOmega);
 }
 
-pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
-    const progress_root = std.Progress.start(.{ .root_name = "chi" });
+pub fn runChi(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
+    const progress_root = std.Progress.start(io, .{ .root_name = "chi" });
 
     // chi level could be a CLI arg, default to 1 for now
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
-    const frames = try loader.loadAllFramesWithProgress(allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
+    const frames = try loader.loadAllFramesWithProgress(io, allocator, args.traj_path, parsed.topology.atoms.len, progress_root);
     defer {
         for (frames) |*f| @constCast(f).deinit();
         allocator.free(frames);
     }
     if (frames.len == 0) return error.NoFrames;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     // Output chi1-chi4 for each frame
     const analysis_node = progress_root.start("Computing chi", frames.len);
@@ -1378,24 +1378,24 @@ pub fn runChi(allocator: std.mem.Allocator, args: Args) !void {
             }
         },
     }
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: summary
 // ============================================================================
 
-pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
+pub fn runSummary(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
     const top_path = args.top_path orelse args.traj_path;
-    var parsed = try loader.loadTopology(allocator, top_path);
+    var parsed = try loader.loadTopology(io, allocator, top_path);
     defer parsed.deinit();
 
     const topo = &parsed.topology;
     const frame = &parsed.frame;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
-    const w = buf.writer(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     // -- File + basic counts ------------------------------------------------
     try w.print("File:     {s}\n", .{top_path});
@@ -1484,7 +1484,7 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
     // -- Trajectory info (if separate trajectory file) ----------------------
     const has_traj = args.top_path != null;
     if (has_traj) {
-        const traj_info = try loader.loadTrajectoryInfo(allocator, args.traj_path, topo.atoms.len);
+        const traj_info = try loader.loadTrajectoryInfo(io, allocator, args.traj_path, topo.atoms.len);
         try w.print("\nTrajectory: {s}\n", .{args.traj_path});
         try w.print("Frames:     {d}\n", .{traj_info.n_frames});
         if (traj_info.first_time != null and traj_info.last_time != null) {
@@ -1496,14 +1496,14 @@ pub fn runSummary(allocator: std.mem.Allocator, args: Args) !void {
         }
     }
 
-    try flushOutput(buf.items, args.output_path);
+    try flushOutput(io, aw.written(), args.output_path);
 }
 
 // ============================================================================
 // Subcommand: convert
 // ============================================================================
 
-pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
+pub fn runConvert(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
     const output_path = args.output_path orelse {
         std.debug.print("error: convert requires --output <file>\n", .{});
         std.process.exit(1);
@@ -1517,12 +1517,12 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
     if (is_traj_output or is_traj_input) {
         // Need topology for atom count
         const top_path = args.top_path orelse args.traj_path;
-        var parsed = try loader.loadTopology(allocator, top_path);
+        var parsed = try loader.loadTopology(io, allocator, top_path);
         defer parsed.deinit();
         const n_atoms = parsed.topology.atoms.len;
 
         // Load all frames from input
-        const frames = try loader.loadAllFrames(allocator, args.traj_path, n_atoms, std.Progress.Node.none);
+        const frames = try loader.loadAllFrames(io, allocator, args.traj_path, n_atoms, std.Progress.Node.none);
         defer {
             for (frames) |*f| @constCast(f).deinit();
             allocator.free(frames);
@@ -1534,36 +1534,36 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
         }
 
         if (loader.isXtc(output_path)) {
-            var writer = try ztraj.io.xtc.XtcWriter.open(allocator, output_path, n_atoms);
+            var writer = try ztraj.io.xtc.XtcWriter.open(io, allocator, output_path, n_atoms);
             defer writer.deinit();
             for (frames) |frame| try writer.writeFrame(frame);
             try writer.close();
         } else if (loader.isTrr(output_path)) {
-            var writer = try ztraj.io.trr.TrrWriter.open(allocator, output_path, n_atoms);
+            var writer = try ztraj.io.trr.TrrWriter.open(io, allocator, output_path, n_atoms);
             defer writer.deinit();
             for (frames) |frame| try writer.writeFrame(frame);
             try writer.close();
         } else if (loader.isNc(output_path)) {
             const has_cell = frames[0].box_vectors != null;
-            var writer = try ztraj.io.nc.NcWriter.open(allocator, output_path, @intCast(n_atoms), has_cell);
+            var writer = try ztraj.io.nc.NcWriter.open(io, allocator, output_path, @intCast(n_atoms), has_cell);
             defer writer.deinit();
             for (frames) |frame| try writer.writeFrame(frame);
             try writer.close();
         } else if (loader.isPdb(output_path)) {
             // Trajectory → single-structure: write first frame only
-            var buf = std.ArrayList(u8){};
-            defer buf.deinit(allocator);
+            var aw: std.Io.Writer.Allocating = .init(allocator);
+            defer aw.deinit();
             if (frames.len > 0) {
-                try ztraj.io.pdb.write(buf.writer(allocator), parsed.topology, frames[0]);
+                try ztraj.io.pdb.write(&aw.writer, parsed.topology, frames[0]);
             }
-            try flushOutput(buf.items, output_path);
+            try flushOutput(io, aw.written(), output_path);
         } else if (loader.isGro(output_path)) {
-            var buf = std.ArrayList(u8){};
-            defer buf.deinit(allocator);
+            var aw: std.Io.Writer.Allocating = .init(allocator);
+            defer aw.deinit();
             if (frames.len > 0) {
-                try ztraj.io.gro.write(buf.writer(allocator), parsed.topology, frames[0]);
+                try ztraj.io.gro.write(&aw.writer, parsed.topology, frames[0]);
             }
-            try flushOutput(buf.items, output_path);
+            try flushOutput(io, aw.written(), output_path);
         } else {
             std.debug.print(
                 "error: unsupported output format for '{s}' (supported: .pdb, .gro, .xtc, .trr, .nc)\n",
@@ -1577,12 +1577,12 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
         });
     } else {
         // Structure-only conversion (PDB/GRO/mmCIF → PDB/GRO)
-        var parsed = try loader.loadTopology(allocator, args.traj_path);
+        var parsed = try loader.loadTopology(io, allocator, args.traj_path);
         defer parsed.deinit();
 
-        var buf = std.ArrayList(u8){};
-        defer buf.deinit(allocator);
-        const w = buf.writer(allocator);
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
+        const w = &aw.writer;
 
         if (loader.isPdb(output_path)) {
             try ztraj.io.pdb.write(w, parsed.topology, parsed.frame);
@@ -1596,7 +1596,7 @@ pub fn runConvert(allocator: std.mem.Allocator, args: Args) !void {
             std.process.exit(1);
         }
 
-        try flushOutput(buf.items, output_path);
+        try flushOutput(io, aw.written(), output_path);
 
         std.debug.print("Converted {s} -> {s} ({d} atoms, {d} residues)\n", .{
             args.traj_path, output_path, parsed.topology.atoms.len, parsed.topology.residues.len,

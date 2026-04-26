@@ -61,7 +61,7 @@ const water_residues = [_][]const u8{
 /// Returns error.InvalidSpec if the string is malformed.
 /// Caller owns the returned slice.
 pub fn byIndex(allocator: std.mem.Allocator, spec: []const u8) ![]u32 {
-    var result = std.ArrayList(u32){};
+    var result = std.ArrayList(u32).empty;
     defer result.deinit(allocator);
 
     var token_iter = std.mem.tokenizeScalar(u8, spec, ',');
@@ -69,7 +69,7 @@ pub fn byIndex(allocator: std.mem.Allocator, spec: []const u8) ![]u32 {
         const trimmed = std.mem.trim(u8, token, " \t\r\n");
         if (trimmed.len == 0) continue;
 
-        if (std.mem.indexOfScalar(u8, trimmed, '-')) |dash_pos| {
+        if (std.mem.findScalar(u8, trimmed, '-')) |dash_pos| {
             // Range: "start-end"
             const start_str = std.mem.trim(u8, trimmed[0..dash_pos], " ");
             const end_str = std.mem.trim(u8, trimmed[dash_pos + 1 ..], " ");
@@ -121,7 +121,7 @@ pub fn byKeyword(
     topology: types.Topology,
     kw: Keyword,
 ) ![]u32 {
-    var result = std.ArrayList(u32){};
+    var result = std.ArrayList(u32).empty;
     defer result.deinit(allocator);
 
     switch (kw) {
@@ -193,7 +193,7 @@ pub fn byName(
     topology: types.Topology,
     name: []const u8,
 ) ![]u32 {
-    var result = std.ArrayList(u32){};
+    var result = std.ArrayList(u32).empty;
     defer result.deinit(allocator);
 
     for (topology.atoms, 0..) |atom, i| {
@@ -216,7 +216,7 @@ pub fn byElement(
     topology: types.Topology,
     elem: Element,
 ) ![]u32 {
-    var result = std.ArrayList(u32){};
+    var result = std.ArrayList(u32).empty;
     defer result.deinit(allocator);
 
     for (topology.atoms, 0..) |atom, i| {

@@ -74,6 +74,38 @@ const c_allocator = std.heap.c_allocator;
 const MAX_PDB_FILE_SIZE = 100 * 1024 * 1024;
 
 // =============================================================================
+// Process-global I/O instance for the C API
+// =============================================================================
+//
+// Python and other FFI consumers call the C API without a `main(init)` entry
+// point, so they cannot supply an `Io` themselves. We lazily construct a
+// shared `Io.Threaded` on first use and reuse it for the lifetime of the
+// process. We claim the right to initialize via a CAS on a state flag, then
+// race-losing threads spin until the winner finishes; in practice the Python
+// GIL serializes calls so contention is non-existent.
+
+const IoInitState = enum(u8) { uninit, initializing, ready };
+
+var io_threaded_storage: std.Io.Threaded = undefined;
+var io_threaded_state: std.atomic.Value(IoInitState) = .init(.uninit);
+
+fn getIo() std.Io {
+    while (true) {
+        switch (io_threaded_state.load(.acquire)) {
+            .ready => return io_threaded_storage.io(),
+            .initializing => std.Thread.yield() catch {},
+            .uninit => {
+                if (io_threaded_state.cmpxchgStrong(.uninit, .initializing, .acq_rel, .acquire) == null) {
+                    io_threaded_storage = std.Io.Threaded.init(c_allocator, .{});
+                    io_threaded_state.store(.ready, .release);
+                    return io_threaded_storage.io();
+                }
+            },
+        }
+    }
+}
+
+// =============================================================================
 // Geometry: Distances
 // =============================================================================
 
@@ -517,7 +549,7 @@ export fn ztraj_load_pdb(
 
     // Read file
     const path_slice = std.mem.sliceTo(path, 0);
-    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(getIo(), path_slice, c_allocator, .limited(MAX_PDB_FILE_SIZE)) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     defer c_allocator.free(data);
@@ -655,7 +687,7 @@ export fn ztraj_load_gro(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(getIo(), path_slice, c_allocator, .limited(MAX_PDB_FILE_SIZE)) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     defer c_allocator.free(data);
@@ -694,7 +726,7 @@ export fn ztraj_load_mmcif(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(getIo(), path_slice, c_allocator, .limited(MAX_PDB_FILE_SIZE)) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     defer c_allocator.free(data);
@@ -734,7 +766,7 @@ export fn ztraj_load_prmtop(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    const data = std.fs.cwd().readFileAlloc(c_allocator, path_slice, MAX_PDB_FILE_SIZE) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(getIo(), path_slice, c_allocator, .limited(MAX_PDB_FILE_SIZE)) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     defer c_allocator.free(data);
@@ -807,7 +839,7 @@ export fn ztraj_open_xtc(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    var reader = xtc_mod.XtcReader.open(c_allocator, path_slice) catch {
+    var reader = xtc_mod.XtcReader.open(getIo(), c_allocator, path_slice) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     errdefer reader.deinit();
@@ -905,7 +937,7 @@ export fn ztraj_open_trr(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    var reader = trr_mod.TrrReader.open(c_allocator, path_slice) catch |err| {
+    var reader = trr_mod.TrrReader.open(getIo(), c_allocator, path_slice) catch |err| {
         return switch (err) {
             trr_mod.TrrReadError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
             trr_mod.TrrReadError.InvalidMagic, trr_mod.TrrReadError.InvalidHeader => ZTRAJ_ERROR_PARSE,
@@ -1009,7 +1041,7 @@ export fn ztraj_open_dcd(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    var reader = dcd_mod.DcdReader.open(c_allocator, path_slice) catch |err| {
+    var reader = dcd_mod.DcdReader.open(getIo(), c_allocator, path_slice) catch |err| {
         return switch (err) {
             dcd_mod.DcdError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
             dcd_mod.DcdError.InvalidMagic, dcd_mod.DcdError.BadFormat => ZTRAJ_ERROR_PARSE,
@@ -1112,7 +1144,7 @@ export fn ztraj_open_nc(
     handle_out.* = null;
 
     const path_slice = std.mem.sliceTo(path, 0);
-    var reader = nc_mod.NcReader.open(c_allocator, path_slice) catch |err| {
+    var reader = nc_mod.NcReader.open(getIo(), c_allocator, path_slice) catch |err| {
         return switch (err) {
             nc_mod.NcError.FileNotFound => ZTRAJ_ERROR_FILE_IO,
             nc_mod.NcError.InvalidMagic,
@@ -1861,18 +1893,19 @@ export fn ztraj_write_pdb(
     if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
+    const io = getIo();
     const path_slice = std.mem.sliceTo(path, 0);
-    const file = std.fs.cwd().createFile(path_slice, .{}) catch {
+    const file = std.Io.Dir.cwd().createFile(io, path_slice, .{}) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
-    defer file.close();
+    defer file.close(io);
 
-    var buf = std.ArrayListUnmanaged(u8){};
-    defer buf.deinit(c_allocator);
-    pdb_mod.write(buf.writer(c_allocator), topo, frame) catch |err| {
+    var aw: std.Io.Writer.Allocating = .init(c_allocator);
+    defer aw.deinit();
+    pdb_mod.write(&aw.writer, topo, frame) catch |err| {
         return if (err == error.OutOfMemory) ZTRAJ_ERROR_OUT_OF_MEMORY else ZTRAJ_ERROR_FILE_IO;
     };
-    file.writeAll(buf.items) catch {
+    file.writeStreamingAll(io, aw.written()) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
 
@@ -1896,18 +1929,19 @@ export fn ztraj_write_gro(
     if (n_atoms != topo.atoms.len) return ZTRAJ_ERROR_INVALID_INPUT;
     const frame = types.Frame.initView(x[0..n_atoms], y[0..n_atoms], z[0..n_atoms]);
 
+    const io = getIo();
     const path_slice = std.mem.sliceTo(path, 0);
-    const file = std.fs.cwd().createFile(path_slice, .{}) catch {
+    const file = std.Io.Dir.cwd().createFile(io, path_slice, .{}) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
-    defer file.close();
+    defer file.close(io);
 
-    var buf = std.ArrayListUnmanaged(u8){};
-    defer buf.deinit(c_allocator);
-    gro_mod.write(buf.writer(c_allocator), topo, frame) catch |err| {
+    var aw: std.Io.Writer.Allocating = .init(c_allocator);
+    defer aw.deinit();
+    gro_mod.write(&aw.writer, topo, frame) catch |err| {
         return if (err == error.OutOfMemory) ZTRAJ_ERROR_OUT_OF_MEMORY else ZTRAJ_ERROR_FILE_IO;
     };
-    file.writeAll(buf.items) catch {
+    file.writeStreamingAll(io, aw.written()) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
 
@@ -1951,7 +1985,7 @@ export fn ztraj_open_xtc_writer(
     handle_out.* = null;
     const path_slice = std.mem.sliceTo(path, 0);
 
-    var writer = xtc_mod.XtcWriter.open(c_allocator, path_slice, n_atoms) catch {
+    var writer = xtc_mod.XtcWriter.open(getIo(), c_allocator, path_slice, n_atoms) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     errdefer writer.deinit();
@@ -2038,7 +2072,7 @@ export fn ztraj_open_trr_writer(
     handle_out.* = null;
     const path_slice = std.mem.sliceTo(path, 0);
 
-    var writer = trr_mod.TrrWriter.open(c_allocator, path_slice, n_atoms) catch {
+    var writer = trr_mod.TrrWriter.open(getIo(), c_allocator, path_slice, n_atoms) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     errdefer writer.deinit();
@@ -2126,7 +2160,7 @@ export fn ztraj_open_nc_writer(
     handle_out.* = null;
     const path_slice = std.mem.sliceTo(path, 0);
 
-    var writer = nc_mod.NcWriter.open(c_allocator, path_slice, n_atoms, has_cell) catch {
+    var writer = nc_mod.NcWriter.open(getIo(), c_allocator, path_slice, n_atoms, has_cell) catch {
         return ZTRAJ_ERROR_FILE_IO;
     };
     errdefer writer.deinit();

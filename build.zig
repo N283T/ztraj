@@ -36,13 +36,13 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "zxdrfile", .module = zxdrfile_mod },
                 .{ .name = "zsasa", .module = zsasa_mod },
             },
         }),
     });
-    lib.linkLibC();
     b.installArtifact(lib);
 
     // CLI executable

@@ -44,8 +44,8 @@ pub const TrrReader = struct {
     const Self = @This();
 
     /// Open a TRR file for reading.
-    pub fn open(allocator: std.mem.Allocator, path: []const u8) !Self {
-        var inner = TrrReaderInner.open(allocator, path) catch |err| {
+    pub fn open(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Self {
+        var inner = TrrReaderInner.open(io, allocator, path) catch |err| {
             return switch (err) {
                 TrrError.FileNotFound => TrrReadError.FileNotFound,
                 TrrError.InvalidMagic => TrrReadError.InvalidMagic,
@@ -148,9 +148,9 @@ pub const TrrWriter = struct {
 
     const Self = @This();
 
-    pub fn open(allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
+    pub fn open(io: std.Io, allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
         const natoms_i: i32 = @intCast(n_atoms);
-        var inner = try TrrWriterInner.open(allocator, path, natoms_i, .write);
+        var inner = try TrrWriterInner.open(io, allocator, path, natoms_i, .write);
         errdefer inner.close() catch {};
         const coords_buf = try allocator.alloc(f32, n_atoms * 3);
         return Self{ .inner = inner, .coords_buf = coords_buf, .allocator = allocator };

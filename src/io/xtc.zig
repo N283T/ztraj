@@ -48,8 +48,8 @@ pub const XtcReader = struct {
     ///
     /// Allocates a single Frame buffer sized to the number of atoms in the file.
     /// Returns error.FileNotFound if the path does not exist.
-    pub fn open(allocator: std.mem.Allocator, path: []const u8) !Self {
-        var inner = XtcReaderInner.open(allocator, path) catch |err| {
+    pub fn open(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !Self {
+        var inner = XtcReaderInner.open(io, allocator, path) catch |err| {
             return switch (err) {
                 XtcError.FileNotFound => XtcReadError.FileNotFound,
                 XtcError.InvalidMagic => XtcReadError.InvalidMagic,
@@ -146,9 +146,9 @@ pub const XtcWriter = struct {
 
     const Self = @This();
 
-    pub fn open(allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
+    pub fn open(io: std.Io, allocator: std.mem.Allocator, path: []const u8, n_atoms: usize) !Self {
         const natoms_i: i32 = @intCast(n_atoms);
-        var inner = try XtcWriterInner.open(allocator, path, natoms_i, .write);
+        var inner = try XtcWriterInner.open(io, allocator, path, natoms_i, .write);
         errdefer inner.close() catch {};
         const coords_buf = try allocator.alloc(f32, n_atoms * 3);
         return Self{ .inner = inner, .coords_buf = coords_buf, .allocator = allocator };
