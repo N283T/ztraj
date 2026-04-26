@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.0] - 2026-04-26
+
+### Changed
+- #100 Migrate to Zig 0.16
+  - Bump `minimum_zig_version` 0.15.2 → 0.16.0; update CI matrix and README
+  - Bump dependencies: zxdrfile v0.2.0 → v0.4.0, zsasa v0.2.4 → v0.2.11
+  - "Juicy Main": `pub fn main(init: std.process.Init)` threads `std.Io` through CLI runners and trajectory readers/writers
+  - C API exposes a process-global `Io.Threaded` lazily (FFI/Python consumers don't need to provide an `Io`)
+  - All `std.fs.{File,Dir,cwd}` migrated to `std.Io.{File,Dir.cwd()}`; file ops now take an `io` argument
+  - DCD and NC native readers/writers now use buffered `std.Io.File.Reader`/`.Writer`
+  - `ArrayList(u8).writer(allocator)` call sites replaced with `std.Io.Writer.Allocating`
+  - 0.16-specific fixes: SIMD `@Vector(N, T)` annotations in `simd/lee_richards.zig`; darwin `vm_prot_t` packed-struct `.{ .READ = true }` in `mmap_reader.zig`
+
+### BREAKING CHANGES
+- Building from source now requires Zig 0.16.0 or later (previously 0.15.2+)
+- Zig API: `XtcReader.open`, `XtcWriter.open`, `TrrReader.open`, `TrrWriter.open`, `DcdReader.open`, `NcReader.open`, `NcWriter.open` now take `io: std.Io` as the first argument
+- Zig API: `cli/loader.loadTopology`, `loadAllFrames`, `loadAllFramesWithProgress`, `loadTrajectoryInfo` and all CLI runner functions now take `io: std.Io` as the first argument
+- The Python (pyztraj) and CLI surfaces are unchanged
+
 ## [0.6.2] - 2026-04-13
 
 ### Added
