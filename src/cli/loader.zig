@@ -4,10 +4,10 @@ const std = @import("std");
 const ztraj = @import("ztraj");
 
 const types = ztraj.types;
-const io = ztraj.io;
+const trajio = ztraj.io;
 
-fn printStderr(msg: []const u8) void {
-    std.fs.File.stderr().writeAll(msg) catch {};
+fn printStderr(io: std.Io, msg: []const u8) void {
+    std.Io.File.stderr().writeStreamingAll(io, msg) catch {};
 }
 
 // ============================================================================
@@ -62,19 +62,19 @@ pub fn isNc(path: []const u8) bool {
 /// Load topology + first frame from a structure or topology file.
 /// Supported formats: PDB, CIF/mmCIF, GRO, PRMTOP/PARM7.
 /// Returns a ParseResult; caller must call .deinit().
-pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.ParseResult {
-    const data = try std.fs.cwd().readFileAlloc(allocator, path, 512 * 1024 * 1024);
+pub fn loadTopology(io_handle: std.Io, allocator: std.mem.Allocator, path: []const u8) !types.ParseResult {
+    const data = try std.Io.Dir.cwd().readFileAlloc(io_handle, path, allocator, .limited(512 * 1024 * 1024));
     defer allocator.free(data);
 
     if (isPdb(path)) {
-        return io.pdb.parse(allocator, data);
+        return trajio.pdb.parse(allocator, data);
     } else if (isCif(path)) {
-        return io.mmcif.parse(allocator, data);
+        return trajio.mmcif.parse(allocator, data);
     } else if (isGro(path)) {
-        return io.gro.parse(allocator, data);
+        return trajio.gro.parse(allocator, data);
     } else if (isPrmtop(path)) {
         // PRMTOP is topology-only — wrap in ParseResult with a zero-atom frame
-        const topo = try io.prmtop.parseTopology(allocator, data);
+        const topo = try trajio.prmtop.parseTopology(allocator, data);
         errdefer {
             var t = topo;
             t.deinit();
@@ -83,7 +83,7 @@ pub fn loadTopology(allocator: std.mem.Allocator, path: []const u8) !types.Parse
         errdefer frame.deinit();
         return types.ParseResult{ .topology = topo, .frame = frame };
     } else {
-        printStderr("error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro, .prmtop, .parm7, .top)\n");
+        printStderr(io_handle, "error: unsupported topology format (supported: .pdb, .cif, .mmcif, .gro, .prmtop, .parm7, .top)\n");
         return error.UnsupportedFormat;
     }
 }
@@ -99,27 +99,28 @@ pub const TrajectoryInfo = struct {
     last_time: ?f32,
 };
 
-fn ensureAtomCount(path: []const u8, expected: usize, actual: usize) !void {
+fn ensureAtomCount(io_handle: std.Io, path: []const u8, expected: usize, actual: usize) !void {
     if (expected == actual) return;
 
     var buf: [256]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, "error: '{s}' has {d} atoms but topology expects {d}\n", .{ path, actual, expected }) catch
         "error: atom count mismatch between trajectory and topology\n";
-    printStderr(msg);
+    printStderr(io_handle, msg);
     return error.InvalidAtomCount;
 }
 
 /// Count frames and capture the first/last timestamps without materializing
 /// every frame in memory.
 pub fn loadTrajectoryInfo(
+    io_handle: std.Io,
     allocator: std.mem.Allocator,
     traj_path: []const u8,
     expected_n_atoms: ?usize,
 ) !TrajectoryInfo {
     if (isXtc(traj_path)) {
-        var reader = try io.xtc.XtcReader.open(allocator, traj_path);
+        var reader = try trajio.xtc.XtcReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
 
         var n_frames: usize = 0;
         var first_time: ?f32 = null;
@@ -131,9 +132,9 @@ pub fn loadTrajectoryInfo(
         }
         return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
     } else if (isDcd(traj_path)) {
-        var reader = try io.dcd.DcdReader.open(allocator, traj_path);
+        var reader = try trajio.dcd.DcdReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
 
         var n_frames: usize = 0;
         var first_time: ?f32 = null;
@@ -145,9 +146,9 @@ pub fn loadTrajectoryInfo(
         }
         return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
     } else if (isTrr(traj_path)) {
-        var reader = try io.trr.TrrReader.open(allocator, traj_path);
+        var reader = try trajio.trr.TrrReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
 
         var n_frames: usize = 0;
         var first_time: ?f32 = null;
@@ -159,9 +160,9 @@ pub fn loadTrajectoryInfo(
         }
         return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
     } else if (isNc(traj_path)) {
-        var reader = try io.nc.NcReader.open(allocator, traj_path);
+        var reader = try trajio.nc.NcReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
 
         var n_frames: usize = 0;
         var first_time: ?f32 = null;
@@ -173,20 +174,20 @@ pub fn loadTrajectoryInfo(
         }
         return .{ .n_frames = n_frames, .first_time = first_time, .last_time = last_time };
     } else {
-        const data = try std.fs.cwd().readFileAlloc(allocator, traj_path, 512 * 1024 * 1024);
+        const data = try std.Io.Dir.cwd().readFileAlloc(io_handle, traj_path, allocator, .limited(512 * 1024 * 1024));
         defer allocator.free(data);
 
         var pr: types.ParseResult = if (isPdb(traj_path))
-            try io.pdb.parse(allocator, data)
+            try trajio.pdb.parse(allocator, data)
         else if (isCif(traj_path))
-            try io.mmcif.parse(allocator, data)
+            try trajio.mmcif.parse(allocator, data)
         else if (isGro(traj_path))
-            try io.gro.parse(allocator, data)
+            try trajio.gro.parse(allocator, data)
         else {
-            return unsupportedTrajectoryFormat(traj_path);
+            return unsupportedTrajectoryFormat(io_handle, traj_path);
         };
         defer pr.deinit();
-        if (expected_n_atoms) |n_atoms| try ensureAtomCount(traj_path, n_atoms, pr.frame.nAtoms());
+        if (expected_n_atoms) |n_atoms| try ensureAtomCount(io_handle, traj_path, n_atoms, pr.frame.nAtoms());
 
         return .{
             .n_frames = 1,
@@ -196,8 +197,8 @@ pub fn loadTrajectoryInfo(
     }
 }
 
-fn unsupportedTrajectoryFormat(_: []const u8) error{UnsupportedFormat} {
-    printStderr("error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .nc, .pdb, .cif, .mmcif, .gro)\n");
+fn unsupportedTrajectoryFormat(io_handle: std.Io, _: []const u8) error{UnsupportedFormat} {
+    printStderr(io_handle, "error: unsupported trajectory/structure format (supported: .xtc, .trr, .dcd, .nc, .pdb, .cif, .mmcif, .gro)\n");
     return error.UnsupportedFormat;
 }
 
@@ -205,21 +206,22 @@ fn unsupportedTrajectoryFormat(_: []const u8) error{UnsupportedFormat} {
 /// Returns allocated []Frame (caller frees each frame then the slice).
 /// An optional progress node is updated per frame loaded.
 pub fn loadAllFrames(
+    io_handle: std.Io,
     allocator: std.mem.Allocator,
     traj_path: []const u8,
     n_atoms: usize,
     progress_node: std.Progress.Node,
 ) ![]types.Frame {
-    var frames = std.ArrayList(types.Frame){};
+    var frames = std.ArrayList(types.Frame).empty;
     errdefer {
         for (frames.items) |*f| f.deinit();
         frames.deinit(allocator);
     }
 
     if (isXtc(traj_path)) {
-        var reader = try io.xtc.XtcReader.open(allocator, traj_path);
+        var reader = try trajio.xtc.XtcReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -232,9 +234,9 @@ pub fn loadAllFrames(
             progress_node.completeOne();
         }
     } else if (isDcd(traj_path)) {
-        var reader = try io.dcd.DcdReader.open(allocator, traj_path);
+        var reader = try trajio.dcd.DcdReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -247,9 +249,9 @@ pub fn loadAllFrames(
             progress_node.completeOne();
         }
     } else if (isTrr(traj_path)) {
-        var reader = try io.trr.TrrReader.open(allocator, traj_path);
+        var reader = try trajio.trr.TrrReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -262,9 +264,9 @@ pub fn loadAllFrames(
             progress_node.completeOne();
         }
     } else if (isNc(traj_path)) {
-        var reader = try io.nc.NcReader.open(allocator, traj_path);
+        var reader = try trajio.nc.NcReader.open(io_handle, allocator, traj_path);
         defer reader.deinit();
-        try ensureAtomCount(traj_path, n_atoms, reader.nAtoms());
+        try ensureAtomCount(io_handle, traj_path, n_atoms, reader.nAtoms());
         while (try reader.next()) |frame_ptr| {
             var copy = try types.Frame.init(allocator, n_atoms);
             @memcpy(copy.x, frame_ptr.x);
@@ -278,21 +280,21 @@ pub fn loadAllFrames(
         }
     } else {
         // Single-frame structure file — parse only for its coordinates.
-        const data = try std.fs.cwd().readFileAlloc(allocator, traj_path, 512 * 1024 * 1024);
+        const data = try std.Io.Dir.cwd().readFileAlloc(io_handle, traj_path, allocator, .limited(512 * 1024 * 1024));
         defer allocator.free(data);
         var pr: types.ParseResult = if (isPdb(traj_path))
-            try io.pdb.parse(allocator, data)
+            try trajio.pdb.parse(allocator, data)
         else if (isCif(traj_path))
-            try io.mmcif.parse(allocator, data)
+            try trajio.mmcif.parse(allocator, data)
         else if (isGro(traj_path))
-            try io.gro.parse(allocator, data)
+            try trajio.gro.parse(allocator, data)
         else {
-            return unsupportedTrajectoryFormat(traj_path);
+            return unsupportedTrajectoryFormat(io_handle, traj_path);
         };
         errdefer pr.frame.deinit();
         defer pr.topology.deinit();
 
-        try ensureAtomCount(traj_path, n_atoms, pr.frame.nAtoms());
+        try ensureAtomCount(io_handle, traj_path, n_atoms, pr.frame.nAtoms());
         try frames.append(allocator, pr.frame);
         progress_node.completeOne();
     }
@@ -303,6 +305,7 @@ pub fn loadAllFrames(
 /// Convenience wrapper: creates a "Loading frames" progress node, loads all
 /// frames, and ends the node automatically via defer.
 pub fn loadAllFramesWithProgress(
+    io_handle: std.Io,
     allocator: std.mem.Allocator,
     traj_path: []const u8,
     n_atoms: usize,
@@ -310,7 +313,7 @@ pub fn loadAllFramesWithProgress(
 ) ![]types.Frame {
     const load_node = progress_root.start("Loading frames", 0);
     defer load_node.end();
-    return loadAllFrames(allocator, traj_path, n_atoms, load_node);
+    return loadAllFrames(io_handle, allocator, traj_path, n_atoms, load_node);
 }
 
 test "loadTrajectoryInfo counts frames without materializing them" {

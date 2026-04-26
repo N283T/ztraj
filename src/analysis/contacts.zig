@@ -108,7 +108,7 @@ pub fn compute(
     scheme: Scheme,
     cutoff: f32,
 ) ![]Contact {
-    var result = std.ArrayList(Contact){};
+    var result = std.ArrayList(Contact).empty;
     errdefer result.deinit(allocator);
 
     const n_res = topology.residues.len;
@@ -230,7 +230,7 @@ pub fn computeParallel(
     const tl_lists = try allocator.alloc(std.ArrayList(Contact), thread_count);
     defer allocator.free(tl_lists);
     for (0..thread_count) |t| {
-        tl_lists[t] = std.ArrayList(Contact){};
+        tl_lists[t] = std.ArrayList(Contact).empty;
     }
     defer for (0..thread_count) |t| {
         tl_lists[t].deinit(allocator);

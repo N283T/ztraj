@@ -125,8 +125,8 @@ fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
 test "writeDelimited CSV with header and rows" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const headers = [_][]const u8{ "frame", "rmsd", "rg" };
     const row0 = [_]f64{ 0.0, 1.23456, 7.89012 };
@@ -136,113 +136,113 @@ test "writeDelimited CSV with header and rows" {
         &row1,
     };
 
-    try writeDelimited(buf.writer(allocator), &headers, &rows, ',');
+    try writeDelimited(&aw.writer, &headers, &rows, ',');
 
-    const output = buf.items;
+    const output = aw.written();
     try std.testing.expect(std.mem.startsWith(u8, output, "frame,rmsd,rg\n"));
-    try std.testing.expect(std.mem.indexOf(u8, output, "0.000000,1.234560,7.890120\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "1.000000,2.345670,8.901230\n") != null);
+    try std.testing.expect(std.mem.find(u8, output, "0.000000,1.234560,7.890120\n") != null);
+    try std.testing.expect(std.mem.find(u8, output, "1.000000,2.345670,8.901230\n") != null);
 }
 
 test "writeDelimited TSV uses tab delimiter" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const headers = [_][]const u8{ "a", "b" };
     const row = [_]f64{ 1.0, 2.0 };
     const rows = [_][]const f64{&row};
 
-    try writeDelimited(buf.writer(allocator), &headers, &rows, '\t');
+    try writeDelimited(&aw.writer, &headers, &rows, '\t');
 
-    const output = buf.items;
+    const output = aw.written();
     try std.testing.expect(std.mem.startsWith(u8, output, "a\tb\n"));
-    try std.testing.expect(std.mem.indexOf(u8, output, "\t") != null);
+    try std.testing.expect(std.mem.find(u8, output, "\t") != null);
     // Must not contain commas.
-    try std.testing.expect(std.mem.indexOf(u8, output, ",") == null);
+    try std.testing.expect(std.mem.find(u8, output, ",") == null);
 }
 
 test "writeDelimited empty rows only writes header" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const headers = [_][]const u8{ "x", "y" };
     const rows = [_][]const f64{};
 
-    try writeDelimited(buf.writer(allocator), &headers, &rows, ',');
+    try writeDelimited(&aw.writer, &headers, &rows, ',');
 
-    try std.testing.expectEqualStrings("x,y\n", buf.items);
+    try std.testing.expectEqualStrings("x,y\n", aw.written());
 }
 
 test "writeJsonArray produces valid JSON array" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const values = [_]f64{ 1.0, 2.5, 3.14159 };
-    try writeJsonArray(buf.writer(allocator), "rmsd", &values);
+    try writeJsonArray(&aw.writer, "rmsd", &values);
 
-    const output = buf.items;
+    const output = aw.written();
     try std.testing.expect(std.mem.startsWith(u8, output, "\"rmsd\": ["));
     try std.testing.expect(std.mem.endsWith(u8, output, "]"));
-    try std.testing.expect(std.mem.indexOf(u8, output, "1.000000") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "3.141590") != null);
+    try std.testing.expect(std.mem.find(u8, output, "1.000000") != null);
+    try std.testing.expect(std.mem.find(u8, output, "3.141590") != null);
 }
 
 test "writeJsonObject produces valid JSON object" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const keys = [_][]const u8{ "rmsd", "rg" };
     const rmsd_vals = [_]f64{ 0.5, 1.0 };
     const rg_vals = [_]f64{ 10.0, 11.0 };
     const values = [_][]const f64{ &rmsd_vals, &rg_vals };
 
-    try writeJsonObject(buf.writer(allocator), &keys, &values);
+    try writeJsonObject(&aw.writer, &keys, &values);
 
-    const output = buf.items;
+    const output = aw.written();
     try std.testing.expect(std.mem.startsWith(u8, output, "{\n"));
     try std.testing.expect(std.mem.endsWith(u8, output, "}"));
-    try std.testing.expect(std.mem.indexOf(u8, output, "\"rmsd\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "\"rg\"") != null);
+    try std.testing.expect(std.mem.find(u8, output, "\"rmsd\"") != null);
+    try std.testing.expect(std.mem.find(u8, output, "\"rg\"") != null);
     // Second key should NOT have a trailing comma.
-    const rg_pos = std.mem.indexOf(u8, output, "\"rg\"").?;
+    const rg_pos = std.mem.find(u8, output, "\"rg\"").?;
     const after_rg = output[rg_pos..];
-    try std.testing.expect(std.mem.indexOf(u8, after_rg, "],") == null);
+    try std.testing.expect(std.mem.find(u8, after_rg, "],") == null);
 }
 
 test "writeJsonArray with empty values" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const values = [_]f64{};
-    try writeJsonArray(buf.writer(allocator), "empty", &values);
+    try writeJsonArray(&aw.writer, "empty", &values);
 
-    try std.testing.expectEqualStrings("\"empty\": []", buf.items);
+    try std.testing.expectEqualStrings("\"empty\": []", aw.written());
 }
 
 test "writeJsonObject with single key" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8){};
-    defer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     const keys = [_][]const u8{"x"};
     const vals = [_]f64{42.0};
     const values = [_][]const f64{&vals};
 
-    try writeJsonObject(buf.writer(allocator), &keys, &values);
+    try writeJsonObject(&aw.writer, &keys, &values);
 
-    const output = buf.items;
+    const output = aw.written();
     // Single key must not have a trailing comma before the closing newline.
-    try std.testing.expect(std.mem.indexOf(u8, output, "],") == null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "42.000000") != null);
+    try std.testing.expect(std.mem.find(u8, output, "],") == null);
+    try std.testing.expect(std.mem.find(u8, output, "42.000000") != null);
 }

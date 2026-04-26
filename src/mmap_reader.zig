@@ -22,22 +22,25 @@ pub const MappedFile = struct {
     }
 };
 
-pub fn mmapFile(allocator: std.mem.Allocator, path: []const u8) !MappedFile {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+pub fn mmapFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !MappedFile {
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    const stat = try file.stat();
+    const stat = try file.stat(io);
     const size: usize = std.math.cast(usize, stat.size) orelse return error.FileTooBig;
     if (size == 0) return .{ .data = &.{}, .allocator = if (is_windows) allocator else {} };
 
     if (is_windows) {
-        const data = try file.readToEndAlloc(allocator, size);
-        return .{ .data = data, .allocator = allocator };
+        // Read from the already-open handle to avoid a TOCTOU re-open.
+        const data = try allocator.alloc(u8, size);
+        errdefer allocator.free(data);
+        const n = try file.readPositionalAll(io, data, 0);
+        return .{ .data = data[0..n], .allocator = allocator };
     } else {
         const mapped = try std.posix.mmap(
             null,
             size,
-            std.posix.PROT.READ,
+            .{ .READ = true },
             .{ .TYPE = .PRIVATE },
             file.handle,
             0,
@@ -46,8 +49,15 @@ pub fn mmapFile(allocator: std.mem.Allocator, path: []const u8) !MappedFile {
     }
 }
 
+fn testIo() std.Io {
+    const t = struct {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+    };
+    return t.threaded.io();
+}
+
 test "mmapFile reads valid PDB" {
-    const mapped = mmapFile(std.testing.allocator, "test_data/1l2y.pdb") catch |err| {
+    const mapped = mmapFile(testIo(), std.testing.allocator, "test_data/1l2y.pdb") catch |err| {
         if (err == error.FileNotFound) return; // Skip when run from non-project-root cwd
         return err;
     };

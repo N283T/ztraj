@@ -54,10 +54,14 @@ pub const dssp = @import("analysis/dssp/dssp.zig");
 
 test {
     // Use refAllDecls (non-recursive) to avoid pulling dssp's test suite
-    // and pdb.zig's @embedFile path issues
+    // and pdb.zig's @embedFile path issues (which go outside the package root).
     @import("std").testing.refAllDecls(@This());
-    // Explicitly pull in parser tests (not reached by non-recursive refAllDecls)
+    // Explicitly pull in module tests (not reached by non-recursive refAllDecls).
     _ = io.gro;
     _ = io.prmtop;
     _ = io.nc;
+    _ = io.dcd;
+    _ = io.xtc;
+    _ = io.trr;
+    _ = io.mmcif;
 }

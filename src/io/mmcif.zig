@@ -243,7 +243,7 @@ pub fn parse(allocator: std.mem.Allocator, data: []const u8) !types.ParseResult 
     // ------------------------------------------------------------------
     // Phase 2: read rows and collect raw atoms
     // ------------------------------------------------------------------
-    var raw_atoms = std.ArrayListUnmanaged(RawAtom){};
+    var raw_atoms = std.ArrayList(RawAtom).empty;
     defer raw_atoms.deinit(allocator);
 
     var row = try allocator.alloc([]const u8, num_cols);

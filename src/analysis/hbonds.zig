@@ -235,13 +235,13 @@ fn inferDHBonds(
     frame: types.Frame,
 ) ![]types.Bond {
     const n_atoms = topology.atoms.len;
-    var bonds = std.ArrayList(types.Bond){};
+    var bonds = std.ArrayList(types.Bond).empty;
     errdefer bonds.deinit(allocator);
 
     // Collect hydrogen indices and donor (N/O) indices.
-    var h_list = std.ArrayList(u32){};
+    var h_list = std.ArrayList(u32).empty;
     defer h_list.deinit(allocator);
-    var donor_list = std.ArrayList(u32){};
+    var donor_list = std.ArrayList(u32).empty;
     defer donor_list.deinit(allocator);
 
     for (0..n_atoms) |i| {
@@ -298,7 +298,7 @@ pub fn detect(
     frame: types.Frame,
     config: Config,
 ) ![]HBond {
-    var result = std.ArrayList(HBond){};
+    var result = std.ArrayList(HBond).empty;
     errdefer result.deinit(allocator);
 
     const n_atoms = topology.atoms.len;
@@ -579,7 +579,7 @@ pub fn detectParallel(
     const actual_threads = @min(n_threads, cpu_count);
 
     // Pre-scan bonds to collect D-H pairs.
-    var dh_list = std.ArrayList(DHBond){};
+    var dh_list = std.ArrayList(DHBond).empty;
     defer dh_list.deinit(allocator);
 
     for (topology.bonds) |bond| {
@@ -616,7 +616,7 @@ pub fn detectParallel(
     const tl_lists = try allocator.alloc(std.ArrayList(HBond), thread_count);
     defer allocator.free(tl_lists);
     for (0..thread_count) |t| {
-        tl_lists[t] = std.ArrayList(HBond){};
+        tl_lists[t] = std.ArrayList(HBond).empty;
     }
     defer for (0..thread_count) |t| {
         tl_lists[t].deinit(allocator);

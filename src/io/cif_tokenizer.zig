@@ -462,10 +462,14 @@ test "quoted string with embedded quote char" {
 }
 
 test "fuzz tokenizer" {
+    // 0.16 reworked the fuzz API: testOne now receives a `*std.testing.Smith`
+    // instead of a `[]const u8`. Pull bytes from Smith into a stack buffer
+    // and tokenize that.
     try std.testing.fuzz({}, struct {
-        fn testOne(_: void, input: []const u8) !void {
-            var tok = Tokenizer.init(input);
-            // Consume all tokens until EOF
+        fn testOne(_: void, smith: *std.testing.Smith) !void {
+            var buf: [4096]u8 = undefined;
+            const len = smith.sliceWithHash(&buf, 0);
+            var tok = Tokenizer.init(buf[0..len]);
             while (true) {
                 const token = tok.next();
                 if (token == .eof) break;

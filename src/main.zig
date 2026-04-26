@@ -9,13 +9,12 @@ const build_options = @import("build_options");
 const cli_args = @import("cli/args.zig");
 const runners = @import("cli/runners.zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    const raw_args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, raw_args);
+    const args_z = try init.minimal.args.toSlice(init.arena.allocator());
+    const raw_args: []const []const u8 = @ptrCast(args_z);
 
     if (raw_args.len < 2) {
         cli_args.printUsage(raw_args[0]);
@@ -25,10 +24,10 @@ pub fn main() !void {
     const first = raw_args[1];
 
     if (std.mem.eql(u8, first, "--version") or std.mem.eql(u8, first, "-V")) {
-        const stdout = std.fs.File.stdout();
+        const stdout = std.Io.File.stdout();
         var buf: [64]u8 = undefined;
         const line = try std.fmt.bufPrint(&buf, "ztraj {s}\n", .{build_options.version});
-        try stdout.writeAll(line);
+        try stdout.writeStreamingAll(io, line);
         return;
     }
     if (std.mem.eql(u8, first, "--help") or std.mem.eql(u8, first, "-h")) {
@@ -51,26 +50,26 @@ pub fn main() !void {
     };
 
     const result = switch (args.subcommand) {
-        .rmsd => runners.runRmsd(allocator, args),
-        .rmsf => runners.runRmsf(allocator, args),
-        .distances => runners.runDistances(allocator, args),
-        .angles => runners.runAngles(allocator, args),
-        .dihedrals => runners.runDihedrals(allocator, args),
-        .rg => runners.runRg(allocator, args),
-        .center => runners.runCenter(allocator, args),
-        .inertia => runners.runInertia(allocator, args),
-        .hbonds => runners.runHbonds(allocator, args),
-        .contacts => runners.runContacts(allocator, args),
-        .rdf => runners.runRdf(allocator, args),
-        .sasa => runners.runSasa(allocator, args),
-        .all => runners.runAll(allocator, args),
-        .dssp => runners.runDssp(allocator, args),
-        .phi => runners.runPhi(allocator, args),
-        .psi => runners.runPsi(allocator, args),
-        .omega => runners.runOmega(allocator, args),
-        .chi => runners.runChi(allocator, args),
-        .summary => runners.runSummary(allocator, args),
-        .convert => runners.runConvert(allocator, args),
+        .rmsd => runners.runRmsd(io, allocator, args),
+        .rmsf => runners.runRmsf(io, allocator, args),
+        .distances => runners.runDistances(io, allocator, args),
+        .angles => runners.runAngles(io, allocator, args),
+        .dihedrals => runners.runDihedrals(io, allocator, args),
+        .rg => runners.runRg(io, allocator, args),
+        .center => runners.runCenter(io, allocator, args),
+        .inertia => runners.runInertia(io, allocator, args),
+        .hbonds => runners.runHbonds(io, allocator, args),
+        .contacts => runners.runContacts(io, allocator, args),
+        .rdf => runners.runRdf(io, allocator, args),
+        .sasa => runners.runSasa(io, allocator, args),
+        .all => runners.runAll(io, allocator, args),
+        .dssp => runners.runDssp(io, allocator, args),
+        .phi => runners.runPhi(io, allocator, args),
+        .psi => runners.runPsi(io, allocator, args),
+        .omega => runners.runOmega(io, allocator, args),
+        .chi => runners.runChi(io, allocator, args),
+        .summary => runners.runSummary(io, allocator, args),
+        .convert => runners.runConvert(io, allocator, args),
     };
 
     result catch |err| {

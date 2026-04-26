@@ -11,7 +11,7 @@ const select = ztraj.select;
 // ============================================================================
 
 fn printStderr(msg: []const u8) void {
-    std.fs.File.stderr().writeAll(msg) catch {};
+    std.debug.print("{s}", .{msg});
 }
 
 fn requireNonEmptySelection(allocator: std.mem.Allocator, selection: []u32, sel_str: []const u8) ![]u32 {
@@ -55,13 +55,13 @@ pub fn resolveSelection(
 
 /// Parse "i-j,k-l" into [][2]u32.
 pub fn parsePairs(allocator: std.mem.Allocator, spec: []const u8) ![][2]u32 {
-    var list = std.ArrayList([2]u32){};
+    var list = std.ArrayList([2]u32).empty;
     errdefer list.deinit(allocator);
 
     var tok = std.mem.tokenizeScalar(u8, spec, ',');
     while (tok.next()) |token| {
         const t = std.mem.trim(u8, token, " \t");
-        const dash = std.mem.indexOfScalar(u8, t, '-') orelse return error.InvalidSpec;
+        const dash = std.mem.findScalar(u8, t, '-') orelse return error.InvalidSpec;
         const a = std.fmt.parseInt(u32, t[0..dash], 10) catch return error.InvalidSpec;
         const b = std.fmt.parseInt(u32, t[dash + 1 ..], 10) catch return error.InvalidSpec;
         try list.append(allocator, .{ a, b });
@@ -71,7 +71,7 @@ pub fn parsePairs(allocator: std.mem.Allocator, spec: []const u8) ![][2]u32 {
 
 /// Parse "i-j-k,l-m-n" into [][3]u32.
 pub fn parseTriplets(allocator: std.mem.Allocator, spec: []const u8) ![][3]u32 {
-    var list = std.ArrayList([3]u32){};
+    var list = std.ArrayList([3]u32).empty;
     errdefer list.deinit(allocator);
 
     var tok = std.mem.tokenizeScalar(u8, spec, ',');
@@ -93,7 +93,7 @@ pub fn parseTriplets(allocator: std.mem.Allocator, spec: []const u8) ![][3]u32 {
 
 /// Parse "i-j-k-l,m-n-o-p" into [][4]u32.
 pub fn parseQuartets(allocator: std.mem.Allocator, spec: []const u8) ![][4]u32 {
-    var list = std.ArrayList([4]u32){};
+    var list = std.ArrayList([4]u32).empty;
     errdefer list.deinit(allocator);
 
     var tok = std.mem.tokenizeScalar(u8, spec, ',');
