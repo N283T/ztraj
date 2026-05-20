@@ -8,11 +8,11 @@
 
 const std = @import("std");
 const types = @import("../types.zig");
-const zxdrfile = @import("zxdrfile");
+const xdr = @import("xdr.zig");
 
-const TrrReaderInner = zxdrfile.TrrReader;
-const TrrWriterInner = zxdrfile.TrrWriter;
-const TrrError = zxdrfile.TrrError;
+const TrrReaderInner = xdr.TrrReader;
+const TrrWriterInner = xdr.TrrWriter;
+const TrrError = xdr.TrrError;
 
 pub const TrrReadError = error{
     FileNotFound,

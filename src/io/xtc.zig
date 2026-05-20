@@ -7,11 +7,11 @@
 
 const std = @import("std");
 const types = @import("../types.zig");
-const zxdrfile = @import("zxdrfile");
+const xdr = @import("xdr.zig");
 
-const XtcReaderInner = zxdrfile.XtcReader;
-const XtcWriterInner = zxdrfile.XtcWriter;
-const XtcError = zxdrfile.XtcError;
+const XtcReaderInner = xdr.XtcReader;
+const XtcWriterInner = xdr.XtcWriter;
+const XtcError = xdr.XtcError;
 
 pub const XtcReadError = error{
     FileNotFound,
