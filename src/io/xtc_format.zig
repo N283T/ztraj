@@ -1,3 +1,5 @@
+//! Low-level XTC reader/writer integrated from zxdrfile v0.4.0.
+//! Coordinates are stored in the file's native nanometer units here.
 // XTC trajectory file reader
 // Zig port of xdrfile library
 //

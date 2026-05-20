@@ -1,6 +1,6 @@
 //! XTC trajectory reader for ztraj.
 //!
-//! Wraps the zxdrfile XtcReader to yield Frame values in ztraj's SOA layout.
+//! Wraps the integrated low-level XDR/XTC reader to yield Frame values in ztraj's SOA layout.
 //! Coordinates are converted from nanometers (XTC native) to angstroms (*10.0)
 //! at read time. The conversion happens at the I/O boundary; all internal
 //! representations use angstroms.

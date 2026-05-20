@@ -1,3 +1,6 @@
+//! Low-level XDR trajectory format API integrated from zxdrfile v0.4.0.
+//! This module intentionally stays format-native; ztraj Frame conversion lives
+//! in `xtc.zig` and `trr.zig`.
 // zxdrfile - XDR trajectory file library for Zig
 //
 // Provides readers and writers for GROMACS trajectory formats:

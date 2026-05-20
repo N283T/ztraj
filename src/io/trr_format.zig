@@ -1,3 +1,5 @@
+//! Low-level TRR reader/writer integrated from zxdrfile v0.4.0.
+//! Coordinates, velocities, and forces remain format-native in this module.
 // TRR trajectory file reader
 // Zig port of xdrfile_trr from mdtraj:
 // https://github.com/mdtraj/mdtraj/tree/master/mdtraj/formats/xtc

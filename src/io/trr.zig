@@ -1,6 +1,6 @@
 //! TRR trajectory reader for ztraj.
 //!
-//! Wraps the zxdrfile TrrReader to yield Frame values in ztraj's SOA layout.
+//! Wraps the integrated low-level XDR/TRR reader to yield Frame values in ztraj's SOA layout.
 //! TRR files store coordinates, velocities, and forces (all optional).
 //! Only coordinates are converted; velocities and forces are discarded.
 //! Coordinates are converted from nanometers (TRR native) to angstroms (*10.0)
