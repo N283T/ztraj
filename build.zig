@@ -6,12 +6,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zxdrfile_dep = b.dependency("zxdrfile", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const zxdrfile_mod = zxdrfile_dep.module("zxdrfile");
-
     const zsasa_dep = b.dependency("zsasa", .{
         .target = target,
         .optimize = optimize,
@@ -23,7 +17,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
-            .{ .name = "zxdrfile", .module = zxdrfile_mod },
             .{ .name = "zsasa", .module = zsasa_mod },
         },
     });
@@ -38,7 +31,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "zxdrfile", .module = zxdrfile_mod },
                 .{ .name = "zsasa", .module = zsasa_mod },
             },
         }),
@@ -58,7 +50,6 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "ztraj", .module = mod },
                 .{ .name = "build_options", .module = options.createModule() },
-                .{ .name = "zxdrfile", .module = zxdrfile_mod },
             },
         }),
     });
