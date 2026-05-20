@@ -8,3 +8,4 @@ notebooks/__marimo__/
 python/dist/
 
 .worktrees/
+zig-pkg/
