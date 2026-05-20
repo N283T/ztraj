@@ -6,3 +6,5 @@ notebooks/.venv/
 notebooks/uv.lock
 notebooks/__marimo__/
 python/dist/
+
+.worktrees/
