@@ -13,3 +13,4 @@ pub const dcd = @import("dcd.zig");
 pub const gro = @import("gro.zig");
 pub const prmtop = @import("prmtop.zig");
 pub const nc = @import("nc.zig");
+pub const xdr = @import("xdr.zig");
