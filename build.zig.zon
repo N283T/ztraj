@@ -4,10 +4,6 @@
     .version = "0.7.0",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        .zxdrfile = .{
-            .url = "git+https://github.com/N283T/zxdrfile.git?ref=v0.4.0#47d8c42cff9b098febd1990cc50438c26987f85c",
-            .hash = "zxdrfile-0.4.0-JIaQ9mIfAgAHB9bW-_p9g6_gfd0tyG3-MmA0LYJKB8rb",
-        },
         .zsasa = .{
             .url = "git+https://github.com/N283T/freesasa-zig.git?ref=v0.2.11#63a9241e965e3f0a9f79519cc9b10a8e431a5eaf",
             .hash = "zsasa-0.2.11-d7uHxJFhEADTdAgq3DrcSPa2VBMVMZ0jR8Aacdf3cTwb",
@@ -18,5 +14,6 @@
         "build.zig.zon",
         "src",
         "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
     },
 }

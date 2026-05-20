@@ -14,7 +14,7 @@ High-performance molecular dynamics trajectory analysis library + CLI in Zig, wi
 - f32 coordinates, f64 intermediate precision for accumulation
 - Internal units: angstroms (XTC nm→Å conversion at I/O boundary)
 - FrameIterator for streaming large trajectories
-- zxdrfile as only external Zig dependency
+- Integrated XDR/XTC/TRR trajectory I/O under `src/io/`; `zsasa` remains the external Zig dependency
 
 ## Build & Test
 

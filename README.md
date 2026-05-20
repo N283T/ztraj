@@ -146,4 +146,4 @@ uv run --with numpy --script validation/validate.py
 
 ## License
 
-MIT
+ztraj is licensed under the MIT License. Bundled XDR trajectory code includes BSD 2-Clause notices in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

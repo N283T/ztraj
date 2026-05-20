@@ -41,6 +41,7 @@ class ZigBuildHook(BuildHookInterface):
         else:
             lib_src = root_dir.joinpath("zig-out", "lib", lib_name)
         exe_src = root_dir.joinpath("zig-out", "bin", exe_name)
+        notices_src = root_dir.joinpath("THIRD_PARTY_NOTICES.md")
 
         # Destination paths (pyztraj/)
         lib_dst = package_dir.joinpath(lib_name)
@@ -59,9 +60,16 @@ class ZigBuildHook(BuildHookInterface):
         if sys.platform != "win32":
             exe_dst.chmod(exe_dst.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
-        # Include both artifacts in the wheel
-        build_data["force_include"][str(lib_dst)] = f"pyztraj/{lib_name}"
-        build_data["force_include"][str(exe_dst)] = f"pyztraj/{exe_name}"
+        if not notices_src.exists():
+            msg = f"Third-party notice file not found: {notices_src}"
+            raise FileNotFoundError(msg)
+
+        # Include artifacts and notices in the wheel without replacing
+        # static force-include entries.
+        force_include = build_data.setdefault("force_include", {})
+        force_include[str(lib_dst)] = f"pyztraj/{lib_name}"
+        force_include[str(exe_dst)] = f"pyztraj/{exe_name}"
+        force_include[str(notices_src)] = "pyztraj/THIRD_PARTY_NOTICES.md"
 
     def _project_root(self, python_dir: Path) -> Path:
         """Locate the Zig project root for both checkout and sdist layouts."""

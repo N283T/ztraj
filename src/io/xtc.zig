@@ -1,17 +1,17 @@
 //! XTC trajectory reader for ztraj.
 //!
-//! Wraps the zxdrfile XtcReader to yield Frame values in ztraj's SOA layout.
+//! Wraps the integrated low-level XDR/XTC reader to yield Frame values in ztraj's SOA layout.
 //! Coordinates are converted from nanometers (XTC native) to angstroms (*10.0)
 //! at read time. The conversion happens at the I/O boundary; all internal
 //! representations use angstroms.
 
 const std = @import("std");
 const types = @import("../types.zig");
-const zxdrfile = @import("zxdrfile");
+const xdr = @import("xdr.zig");
 
-const XtcReaderInner = zxdrfile.XtcReader;
-const XtcWriterInner = zxdrfile.XtcWriter;
-const XtcError = zxdrfile.XtcError;
+const XtcReaderInner = xdr.XtcReader;
+const XtcWriterInner = xdr.XtcWriter;
+const XtcError = xdr.XtcError;
 
 pub const XtcReadError = error{
     FileNotFound,
