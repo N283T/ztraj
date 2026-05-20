@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0] - 2026-05-20
+
+### Added
+- #103 Integrate XDR trajectory I/O into ztraj
+  - Move XDR/XTC/TRR low-level implementation into `src/io/` and remove the external `zxdrfile` Zig dependency
+  - Preserve high-level `ztraj.io.xtc` and `ztraj.io.trr` reader/writer APIs
+  - Add third-party BSD 2-Clause notices to Zig and Python package distributions
+
+### Changed
+- #104 Ignore local Zig package cache
+
 ## [0.7.0] - 2026-04-26
 
 ### Changed
