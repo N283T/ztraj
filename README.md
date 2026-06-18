@@ -8,6 +8,35 @@
 
 High-performance molecular dynamics trajectory analysis library and CLI, written in Zig with Python bindings.
 
+## Quick start
+
+Install from PyPI. This installs both the Python package (`pyztraj`) and the `ztraj` CLI.
+
+```bash
+pip install pyztraj
+# or
+uv tool install pyztraj
+```
+
+```bash
+# RMSD against frame 0 for backbone atoms
+ztraj rmsd traj.xtc --top structure.pdb --select backbone --ref 0
+
+# Radius of gyration
+ztraj rg traj.xtc --top structure.pdb --select protein
+
+# Convert structure or trajectory files
+ztraj convert input.gro --output output.pdb
+ztraj convert traj.xtc --top structure.pdb --output traj.trr
+```
+
+```python
+import pyztraj
+
+struct = pyztraj.load_pdb("structure.pdb")
+print(struct.n_atoms)
+```
+
 ## Features
 
 - **Fast**: SIMD-accelerated computation with multi-threaded execution
@@ -18,13 +47,7 @@ High-performance molecular dynamics trajectory analysis library and CLI, written
 
 ## CLI
 
-```bash
-# Install from PyPI (no Zig required)
-uv tool install pyztraj
-
-# Or build from source (requires Zig 0.16.0+)
-zig build -Doptimize=ReleaseFast
-```
+The `ztraj` command is included when installing `pyztraj` from PyPI.
 
 ```bash
 # RMSD against frame 0 for backbone atoms
@@ -67,11 +90,11 @@ ztraj rg traj.xtc --top structure.pdb --format csv --output rg.csv
 
 ```bash
 pip install pyztraj
-# or
-uv pip install pyztraj
+# or, for CLI-only use
+uv tool install pyztraj
 ```
 
-Pre-built wheels are available for Linux (x86_64/aarch64), macOS (x86_64/ARM64), and Windows (amd64) with Python 3.11–3.13.
+This also installs the `ztraj` command. Pre-built wheels are available for Linux (x86_64/aarch64), macOS (x86_64/ARM64), and Windows (amd64) with Python 3.11–3.13.
 
 To build from source instead, see [Building from source](#building-from-source).
 
