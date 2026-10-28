@@ -22,7 +22,12 @@ pub const DcdError = error{
     BadFormat,
     OutOfMemory,
     FixedAtomsNotSupported,
+    /// The file ends in the middle of a frame (cut-off or partially written).
+    TruncatedFrame,
 };
+
+/// One AKMA time unit in picoseconds (CHARMM/NAMD convention).
+pub const AKMA_TO_PS: f64 = 0.04888821;
 
 /// CHARMM extension flags parsed from the DCD header.
 const DCD_IS_CHARMM: i32 = 0x01;
@@ -64,6 +69,12 @@ pub const DcdReader = struct {
     /// Reused SOA frame returned to callers.
     frame: types.Frame,
     frames_read: u32,
+    /// Unit-cell angles (alpha, beta, gamma) in degrees of the frame most
+    /// recently returned by next(). null when the file stores no unit cell.
+    box_angles: ?[3]f32 = null,
+    /// Unit-cell edge lengths (a, b, c) in angstroms of the frame most
+    /// recently returned by next(). null when the file stores no unit cell.
+    box_lengths: ?[3]f32 = null,
     allocator: std.mem.Allocator,
 
     const Self = @This();
@@ -136,15 +147,29 @@ pub const DcdReader = struct {
         return @intCast(@max(0, self.header.nsets));
     }
 
+    /// Number of frames returned by next() so far. When nFrames() is non-zero
+    /// and next() returns null with fewer frames read, the file holds fewer
+    /// frames than its header announces (some writers leave the header stale,
+    /// so this is not treated as an error).
+    pub fn framesRead(self: *const Self) u32 {
+        return self.frames_read;
+    }
+
     /// Read the next frame.
     ///
     /// Returns a pointer to the internal SOA frame on success.
-    /// Returns null at genuine end of file.
-    /// Returns an error for any actual read or format failure.
+    /// Returns null at a clean end of file (the file ends between frames).
+    /// Returns DcdError.TruncatedFrame if the file ends inside a frame.
+    /// Returns an error for any other read or format failure.
     /// The returned pointer is valid until the next call to next() or deinit().
     pub fn next(self: *Self) !?*const types.Frame {
+        // End of file exactly at a frame boundary is the only clean end.
+        _ = self.reader.interface.peekByte() catch |err| switch (err) {
+            error.EndOfStream => return null,
+            else => return DcdError.ReadError,
+        };
         self.readFrameInto() catch |err| {
-            if (err == DcdError.EndOfFile) return null;
+            if (err == DcdError.EndOfFile) return DcdError.TruncatedFrame;
             return err;
         };
         return &self.frame;
@@ -158,10 +183,14 @@ pub const DcdReader = struct {
         const fc: i64 = @intCast(self.frames_read);
         const step_i64: i64 = @as(i64, self.header.istart) + fc * @as(i64, self.header.nsavc);
         const step: i32 = @intCast(@min(step_i64, std.math.maxInt(i32)));
-        const time: f32 = @as(f32, @floatFromInt(self.frames_read)) * self.header.delta;
+        // DELTA is in AKMA units per step; convert (istart + i * nsavc) steps to ps.
+        const time: f32 = @floatCast(@as(f64, @floatFromInt(step_i64)) *
+            @as(f64, self.header.delta) * AKMA_TO_PS);
 
         // 1. Optionally read CHARMM unit cell block.
         var box_vectors: ?[3][3]f32 = null;
+        var box_lengths: ?[3]f32 = null;
+        var box_angles: ?[3]f32 = null;
         if ((self.header.charmm & DCD_IS_CHARMM) != 0 and
             (self.header.charmm & DCD_HAS_EXTRA_BLOCK) != 0)
         {
@@ -177,15 +206,13 @@ pub const DcdReader = struct {
                 for (0..6) |i| {
                     uc[i] = try self.readFloat64();
                 }
-                // Build an orthogonal box from a, b, c lengths (indices 0, 2, 5).
-                const a: f32 = @floatCast(uc[0]);
-                const b: f32 = @floatCast(uc[2]);
-                const c: f32 = @floatCast(uc[5]);
-                box_vectors = .{
-                    .{ a, 0.0, 0.0 },
-                    .{ 0.0, b, 0.0 },
-                    .{ 0.0, 0.0, c },
-                };
+                // Slots are A, gamma, B, beta, alpha, C. Newer CHARMM stores the
+                // cosines of the angles; older files and NAMD store degrees.
+                const ang = unitCellAngles(uc[4], uc[3], uc[1]);
+                const lengths = [3]f32{ @floatCast(uc[0]), @floatCast(uc[2]), @floatCast(uc[5]) };
+                box_lengths = lengths;
+                box_angles = ang;
+                box_vectors = triclinicVectors(lengths, ang);
             } else {
                 // Unknown block — skip it.
                 self.reader.seekBy(@intCast(uc_marker)) catch return DcdError.ReadError;
@@ -210,6 +237,8 @@ pub const DcdReader = struct {
         self.frame.step = step;
         self.frame.time = time;
         self.frame.box_vectors = box_vectors;
+        self.box_lengths = box_lengths;
+        self.box_angles = box_angles;
         self.frames_read += 1;
     }
 
@@ -294,6 +323,48 @@ pub const DcdReader = struct {
         return @bitCast(std.mem.readInt(u64, &buf, .little));
     }
 };
+
+/// Convert the three stored angle values (alpha, beta, gamma) to degrees.
+/// Values with magnitude <= 1 are cosines (newer CHARMM); others are degrees.
+fn unitCellAngles(alpha: f64, beta: f64, gamma: f64) [3]f32 {
+    const are_cosines = @abs(alpha) <= 1.0 and @abs(beta) <= 1.0 and @abs(gamma) <= 1.0;
+    if (are_cosines) {
+        const to_deg = 180.0 / std.math.pi;
+        return .{
+            @floatCast(std.math.acos(alpha) * to_deg),
+            @floatCast(std.math.acos(beta) * to_deg),
+            @floatCast(std.math.acos(gamma) * to_deg),
+        };
+    }
+    return .{ @floatCast(alpha), @floatCast(beta), @floatCast(gamma) };
+}
+
+/// Box vectors (rows a, b, c) from edge lengths and angles in degrees.
+/// Orthogonal cells give a diagonal matrix.
+fn triclinicVectors(l: [3]f32, ang: [3]f32) [3][3]f32 {
+    const to_rad = std.math.pi / 180.0;
+    const ca: f64 = @cos(@as(f64, ang[0]) * to_rad);
+    const cb: f64 = @cos(@as(f64, ang[1]) * to_rad);
+    const cg: f64 = @cos(@as(f64, ang[2]) * to_rad);
+    const sg: f64 = @sin(@as(f64, ang[2]) * to_rad);
+    // Exact zeros for right angles (cos(90 deg) is not exactly 0 in floating point).
+    const ca_ = if (ang[0] == 90.0) 0.0 else ca;
+    const cb_ = if (ang[1] == 90.0) 0.0 else cb;
+    const cg_ = if (ang[2] == 90.0) 0.0 else cg;
+    const sg_ = if (ang[2] == 90.0) 1.0 else sg;
+    const a: f64 = l[0];
+    const b: f64 = l[1];
+    const c: f64 = l[2];
+    const cx = c * cb_;
+    const cy = if (sg_ != 0) c * (ca_ - cb_ * cg_) / sg_ else 0.0;
+    const cz2 = c * c - cx * cx - cy * cy;
+    const cz = if (cz2 > 0) @sqrt(cz2) else 0.0;
+    return .{
+        .{ @floatCast(a), 0.0, 0.0 },
+        .{ @floatCast(b * cg_), @floatCast(b * sg_), 0.0 },
+        .{ @floatCast(cx), @floatCast(cy), @floatCast(cz) },
+    };
+}
 
 // ============================================================================
 // Header parser (free function, operates on a std.Io.File.Reader)
@@ -491,4 +562,190 @@ test "DcdReader reads all frames from DCD file" {
 
     // 1l2y.dcd has 38 frames.
     try std.testing.expectEqual(@as(u32, 38), count);
+}
+
+// ============================================================================
+// Synthetic-file tests (no DCD fixture ships with the repo)
+// ============================================================================
+
+const TestDcd = struct {
+    nframes: u32 = 3,
+    natoms: u32 = 2,
+    istart: i32 = 100,
+    nsavc: i32 = 10,
+    delta: f32 = 0.5,
+    /// Six unit-cell values per frame (A, gamma, B, beta, alpha, C); null = no unit cell.
+    cell: ?[6]f64 = null,
+};
+
+fn putI32(list: *std.ArrayList(u8), a: std.mem.Allocator, v: i32) !void {
+    var b: [4]u8 = undefined;
+    std.mem.writeInt(i32, &b, v, .little);
+    try list.appendSlice(a, &b);
+}
+
+fn buildTestDcd(a: std.mem.Allocator, p: TestDcd) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    var hdr = [_]u8{0} ** 84;
+    @memcpy(hdr[0..4], "CORD");
+    std.mem.writeInt(i32, hdr[4..8], @intCast(p.nframes), .little);
+    std.mem.writeInt(i32, hdr[8..12], p.istart, .little);
+    std.mem.writeInt(i32, hdr[12..16], p.nsavc, .little);
+    std.mem.writeInt(u32, hdr[40..44], @bitCast(p.delta), .little);
+    std.mem.writeInt(i32, hdr[44..48], if (p.cell != null) 1 else 0, .little);
+    std.mem.writeInt(i32, hdr[80..84], 24, .little); // CHARMM version
+    try putI32(&out, a, 84);
+    try out.appendSlice(a, &hdr);
+    try putI32(&out, a, 84);
+    try putI32(&out, a, 84); // title block: ntitle + 1 line
+    try putI32(&out, a, 1);
+    try out.appendNTimes(a, ' ', 80);
+    try putI32(&out, a, 84);
+    try putI32(&out, a, 4);
+    try putI32(&out, a, @intCast(p.natoms));
+    try putI32(&out, a, 4);
+    for (0..p.nframes) |f| {
+        if (p.cell) |c| {
+            try putI32(&out, a, 48);
+            for (c) |v| {
+                var b: [8]u8 = undefined;
+                std.mem.writeInt(u64, &b, @bitCast(v), .little);
+                try out.appendSlice(a, &b);
+            }
+            try putI32(&out, a, 48);
+        }
+        for (0..3) |axis| {
+            try putI32(&out, a, @intCast(p.natoms * 4));
+            for (0..p.natoms) |i| {
+                const v: f32 = @floatFromInt(f * 100 + axis * 10 + i);
+                var b: [4]u8 = undefined;
+                std.mem.writeInt(u32, &b, @bitCast(v), .little);
+                try out.appendSlice(a, &b);
+            }
+            try putI32(&out, a, @intCast(p.natoms * 4));
+        }
+    }
+    return out.toOwnedSlice(a);
+}
+
+fn openTestDcd(tmp: *std.testing.TmpDir, bytes: []const u8) !DcdReader {
+    const io = testIo();
+    try tmp.dir.writeFile(io, .{ .sub_path = "t.dcd", .data = bytes });
+    var path_buf: [128]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/t.dcd", .{tmp.sub_path});
+    return DcdReader.open(io, std.testing.allocator, path);
+}
+
+test "DcdReader clean end between frames returns null" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{});
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    var n: u32 = 0;
+    while (try r.next()) |_| n += 1;
+    try std.testing.expectEqual(@as(u32, 3), n);
+    try std.testing.expectEqual(@as(u32, 3), r.framesRead());
+}
+
+test "DcdReader reports TruncatedFrame for a file cut inside the last frame" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{});
+    defer a.free(bytes);
+    // Frame size: 3 * (4 + 8 + 4) = 48 bytes. Cut at several offsets inside the last frame.
+    for ([_]usize{ 1, 3, 4, 10, 30, 47 }) |cut| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var r = try openTestDcd(&tmp, bytes[0 .. bytes.len - cut]);
+        defer r.deinit();
+        try std.testing.expect((try r.next()) != null);
+        try std.testing.expect((try r.next()) != null);
+        try std.testing.expectError(DcdError.TruncatedFrame, r.next());
+    }
+}
+
+test "DcdReader time is (istart + i*nsavc) * delta in ps" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{ .istart = 100, .nsavc = 10, .delta = 0.5 });
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    // step 100 -> 100 * 0.5 * 0.04888821 = 2.4444105 ps
+    const f0 = (try r.next()).?;
+    try std.testing.expectEqual(@as(i32, 100), f0.step);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.4444105), f0.time, 1e-5);
+    const f1 = (try r.next()).?;
+    try std.testing.expectEqual(@as(i32, 110), f1.step);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.6888516), f1.time, 1e-5);
+    const f2 = (try r.next()).?;
+    try std.testing.expectEqual(@as(i32, 120), f2.step);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.9332926), f2.time, 1e-5);
+}
+
+test "DcdReader exposes unit-cell angles in degrees" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{ .cell = .{ 30.0, 70.0, 40.0, 80.0, 60.0, 50.0 } });
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    const f = (try r.next()).?;
+    try std.testing.expectEqual([3]f32{ 30, 40, 50 }, r.box_lengths.?);
+    try std.testing.expectEqual([3]f32{ 60, 80, 70 }, r.box_angles.?);
+    const bv = f.box_vectors.?;
+    // Row lengths equal the cell edges; angle between a and b is gamma.
+    const lb = @sqrt(bv[1][0] * bv[1][0] + bv[1][1] * bv[1][1] + bv[1][2] * bv[1][2]);
+    const lc = @sqrt(bv[2][0] * bv[2][0] + bv[2][1] * bv[2][1] + bv[2][2] * bv[2][2]);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), lb, 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), lc, 1e-3);
+    const cos_g = (bv[0][0] * bv[1][0]) / (30.0 * 40.0);
+    try std.testing.expectApproxEqAbs(@cos(@as(f32, 70) * std.math.pi / 180.0), cos_g, 1e-5);
+}
+
+test "DcdReader converts cosine-encoded unit-cell angles to degrees" {
+    const a = std.testing.allocator;
+    // cos(60) = 0.5, cos(90) = 0, cos(120) = -0.5 (alpha=60, beta=90, gamma=120)
+    const bytes = try buildTestDcd(a, .{ .cell = .{ 10.0, -0.5, 10.0, 0.0, 0.5, 10.0 } });
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    _ = (try r.next()).?;
+    const ang = r.box_angles.?;
+    try std.testing.expectApproxEqAbs(@as(f32, 60), ang[0], 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 90), ang[1], 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 120), ang[2], 1e-3);
+}
+
+test "DcdReader orthogonal cell keeps a diagonal box" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{ .cell = .{ 30.0, 90.0, 40.0, 90.0, 90.0, 50.0 } });
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    const f = (try r.next()).?;
+    try std.testing.expectEqual([3][3]f32{ .{ 30, 0, 0 }, .{ 0, 40, 0 }, .{ 0, 0, 50 } }, f.box_vectors.?);
+    try std.testing.expectEqual([3]f32{ 90, 90, 90 }, r.box_angles.?);
+}
+
+test "DcdReader without unit cell has no box angles" {
+    const a = std.testing.allocator;
+    const bytes = try buildTestDcd(a, .{});
+    defer a.free(bytes);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var r = try openTestDcd(&tmp, bytes);
+    defer r.deinit();
+    _ = (try r.next()).?;
+    try std.testing.expect(r.box_angles == null);
+    try std.testing.expect(r.box_lengths == null);
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- DCD reader: a file that ends inside a frame now fails with `DcdError.TruncatedFrame` instead of being treated as a clean end of file; only an end between frames returns `null`
+- DCD reader: frame time is now `(istart + i * nsavc) * delta * 0.04888821` ps (AKMA to ps), consistent with `step` and with XTC; it was `i * delta` in raw AKMA units
+- DCD reader: unit-cell angles are no longer dropped. CHARMM files that store cosines are converted to degrees, and `box_vectors` is triclinic for non-orthogonal cells
+
+### Added
+- `DcdReader.box_lengths` and `DcdReader.box_angles` (degrees, alpha/beta/gamma) for the most recent frame, `null` without a unit cell
+- `DcdReader.framesRead()` so callers can compare against `nFrames()` when the header frame count is non-zero
+
 ## [0.8.0] - 2026-05-20
 
 ### Added
