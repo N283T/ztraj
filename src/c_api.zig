@@ -1464,7 +1464,7 @@ export fn ztraj_compute_sasa(
         config,
     ) catch |err| {
         return switch (err) {
-            error.NoAtoms, error.IndexOutOfBounds => ZTRAJ_ERROR_INVALID_INPUT,
+            error.NoAtoms, error.IndexOutOfBounds, error.InvalidInput => ZTRAJ_ERROR_INVALID_INPUT,
             error.OutOfMemory => ZTRAJ_ERROR_OUT_OF_MEMORY,
             else => ZTRAJ_ERROR_OUT_OF_MEMORY,
         };
