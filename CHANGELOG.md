@@ -11,6 +11,10 @@
 - `DcdReader.box_lengths` and `DcdReader.box_angles` (degrees, alpha/beta/gamma) for the most recent frame, `null` without a unit cell
 - `DcdReader.framesRead()` so callers can compare against `nFrames()` when the header frame count is non-zero
 
+### Changed
+- SASA: bump zsasa v0.2.11 → 0.12.0 (main at `4fcecc1`) and pass the coordinates through zsasa's `AtomsGen` entry points. Each frame is gathered once from ztraj's f32 x/y/z arrays into zsasa's f64 positions, instead of into three f64 arrays that zsasa copied again. Per-atom areas are unchanged
+- SASA: a non-finite coordinate or a probe radius zsasa rejects is reported as `ZTRAJ_ERROR_INVALID_INPUT` by `ztraj_compute_sasa` (it was reported as out of memory); without a selection, more coordinates than topology atoms is `error.IndexOutOfBounds`
+
 ## [0.8.0] - 2026-05-20
 
 ### Added

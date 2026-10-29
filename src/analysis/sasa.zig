@@ -14,11 +14,10 @@ const types = @import("../types.zig");
 const element_mod = @import("../element.zig");
 const zsasa = @import("zsasa");
 
-const AtomInput = zsasa.types.AtomInput;
+const Atoms = zsasa.types.AtomsGen(f64);
 const Config = zsasa.types.Config;
-const SasaResult = zsasa.types.SasaResult;
-const shrake_rupley = zsasa.shrake_rupley;
-const shrake_rupley_bitmask = zsasa.shrake_rupley_bitmask;
+const ShrakeRupley = zsasa.shrake_rupley.ShrakeRupleyGen(f64);
+const ShrakeRupleyBitmask = zsasa.shrake_rupley_bitmask.ShrakeRupleyBitmaskGen(f64);
 
 /// SASA algorithm variant.
 pub const Algorithm = enum {
@@ -79,73 +78,41 @@ pub fn compute(
         for (indices) |idx| {
             if (idx >= n_atoms or idx >= topology.atoms.len) return error.IndexOutOfBounds;
         }
-    }
+    } else if (n_atoms > topology.atoms.len) return error.IndexOutOfBounds;
 
-    // Convert f32 SOA coords to f64 for zsasa
-    const x64 = try allocator.alloc(f64, n_selected);
-    defer allocator.free(x64);
-    const y64 = try allocator.alloc(f64, n_selected);
-    defer allocator.free(y64);
-    const z64 = try allocator.alloc(f64, n_selected);
-    defer allocator.free(z64);
+    // One pass from ztraj's f32 x/y/z arrays to zsasa's f64 positions.
+    const positions = try allocator.alloc(zsasa.types.Vec3, n_selected);
+    defer allocator.free(positions);
+    try zsasa.types.gatherPositions(f64, positions, x, y, z, atom_indices);
+
     const radii = try allocator.alloc(f64, n_selected);
     defer allocator.free(radii);
-
-    if (atom_indices) |indices| {
-        for (indices, 0..) |idx, i| {
-            x64[i] = @floatCast(x[idx]);
-            y64[i] = @floatCast(y[idx]);
-            z64[i] = @floatCast(z[idx]);
-            radii[i] = topology.atoms[idx].element.vdwRadius();
-        }
-    } else {
-        for (0..n_selected) |i| {
-            x64[i] = @floatCast(x[i]);
-            y64[i] = @floatCast(y[i]);
-            z64[i] = @floatCast(z[i]);
-            radii[i] = topology.atoms[i].element.vdwRadius();
-        }
+    for (radii, 0..) |*r, i| {
+        const atom = if (atom_indices) |indices| indices[i] else i;
+        r.* = topology.atoms[atom].element.vdwRadius();
     }
 
-    const input = AtomInput{
-        .x = x64,
-        .y = y64,
-        .z = z64,
-        .r = radii,
-        .residue = null,
-        .atom_name = null,
-        .element = null,
-        .chain_id = null,
-        .residue_num = null,
-        .insertion_code = null,
-        .allocator = allocator,
-    };
-
+    const atoms = Atoms{ .positions = positions, .radii = radii };
     const zsasa_config = Config{
         .n_points = config.n_points,
         .probe_radius = config.probe_radius,
     };
 
-    var result = switch (config.algorithm) {
+    const result = switch (config.algorithm) {
         .shrake_rupley => if (config.n_threads == 1)
-            try shrake_rupley.calculateSasa(allocator, input, zsasa_config)
+            try ShrakeRupley.calculateSasaAtoms(allocator, atoms, zsasa_config)
         else
-            try shrake_rupley.calculateSasaParallel(allocator, input, zsasa_config, config.n_threads),
+            try ShrakeRupley.calculateSasaParallelAtoms(allocator, atoms, zsasa_config, config.n_threads),
         .shrake_rupley_bitmask => if (config.n_threads == 1)
-            try shrake_rupley_bitmask.calculateSasa(allocator, input, zsasa_config)
+            try ShrakeRupleyBitmask.calculateSasaAtomsWithCorrection(allocator, atoms, zsasa_config, .{})
         else
-            try shrake_rupley_bitmask.calculateSasaParallel(allocator, input, zsasa_config, config.n_threads),
+            try ShrakeRupleyBitmask.calculateSasaParallelAtomsWithCorrection(allocator, atoms, zsasa_config, config.n_threads, .{}),
     };
 
-    // Copy atom_areas out (zsasa result owns its own copy)
-    const atom_areas = try allocator.alloc(f64, n_selected);
-    @memcpy(atom_areas, result.atom_areas);
-    const total = result.total_area;
-    result.deinit();
-
+    // The areas were allocated with `allocator`; the output takes them over.
     return SasaOutput{
-        .total_area = total,
-        .atom_areas = atom_areas,
+        .total_area = result.total_area,
+        .atom_areas = result.atom_areas,
         .allocator = allocator,
     };
 }
