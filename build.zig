@@ -6,19 +6,41 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zsasa_dep = b.dependency("zsasa", .{
+    // When set, only the `ztraj-io` module is configured and the lazy `zsasa`
+    // dependency is never requested, so it is never fetched. Package consumers
+    // that only need file I/O pass `.io_only = true` to `b.dependency("ztraj")`.
+    const io_only = b.option(
+        bool,
+        "io_only",
+        "Only expose the ztraj-io module; do not fetch zsasa or build the CLI/library",
+    ) orelse false;
+
+    // Standalone structure/trajectory I/O module (no zsasa dependency).
+    const io_mod = b.addModule("ztraj-io", .{
+        .root_source_file = b.path("src/io_root.zig"),
+        .target = target,
+    });
+
+    const test_step = b.step("test", "Run tests");
+    const io_tests = b.addTest(.{ .root_module = io_mod });
+    test_step.dependOn(&b.addRunArtifact(io_tests).step);
+
+    if (io_only) return;
+
+    // zsasa is a lazy dependency. On the first run without it, this returns
+    // null; the build runner then fetches it and re-runs this function. The
+    // modules and artifacts below are still declared on that first pass (just
+    // without the zsasa import) so that consumers looking up `ztraj` do not
+    // fail before the fetch happens.
+    const zsasa_mod: ?*std.Build.Module = if (b.lazyDependency("zsasa", .{
         .target = target,
         .optimize = optimize,
-    });
-    const zsasa_mod = zsasa_dep.module("zsasa");
+    })) |dep| dep.module("zsasa") else null;
 
     // Library module (exposed to package consumers via zig fetch)
     const mod = b.addModule("ztraj", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .imports = &.{
-            .{ .name = "zsasa", .module = zsasa_mod },
-        },
     });
 
     // Shared library (C API for Python bindings)
@@ -30,11 +52,12 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
-            .imports = &.{
-                .{ .name = "zsasa", .module = zsasa_mod },
-            },
         }),
     });
+    if (zsasa_mod) |zsasa| {
+        mod.addImport("zsasa", zsasa);
+        lib.root_module.addImport("zsasa", zsasa);
+    }
     b.installArtifact(lib);
 
     // CLI executable
@@ -67,7 +90,6 @@ pub fn build(b: *std.Build) void {
     // Test step
     const mod_tests = b.addTest(.{ .root_module = mod });
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
-    const test_step = b.step("test", "Run tests");
     test_step.dependOn(&b.addRunArtifact(mod_tests).step);
     test_step.dependOn(&b.addRunArtifact(exe_tests).step);
 
