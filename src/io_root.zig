@@ -26,9 +26,9 @@ pub const xdr = io.xdr;
 pub const io = @import("io/root.zig");
 
 test {
-    // Compile-check the standalone module and run the format tests through it.
-    // `pdb` is left out because its tests `@embedFile` data outside the module
-    // root (same restriction as in `root.zig`); they run in the `ztraj` tests.
+    // Compile-check the standalone module (build.zig compiles but does not
+    // run this test binary). `pdb` is left out because its tests `@embedFile`
+    // data outside the module root (same restriction as in `root.zig`).
     _ = types;
     _ = element;
     _ = mmcif;
