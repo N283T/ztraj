@@ -15,6 +15,7 @@ High-performance molecular dynamics trajectory analysis library + CLI in Zig, wi
 - Internal units: angstroms (XTC nm→Å conversion at I/O boundary)
 - FrameIterator for streaming large trajectories
 - Integrated XDR/XTC/TRR trajectory I/O under `src/io/`; `zsasa` remains the external Zig dependency
+- Two package modules: `ztraj` (full) and `ztraj-io` (I/O only). `zsasa` is lazy; `-Dio_only=true` skips it. Code under `src/io/` must not import zsasa or analysis code
 
 ## Build & Test
 
@@ -44,6 +45,7 @@ uv run --with numpy --script validation/validate.py
 src/
   main.zig          # CLI entry point
   root.zig          # Library root (public API)
+  io_root.zig       # Root of the standalone `ztraj-io` module (no zsasa)
   c_api.zig         # C ABI exports for Python bindings
   types.zig         # Core types (Topology, Frame, Atom, etc.)
   element.zig       # Periodic table data

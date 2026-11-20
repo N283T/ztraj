@@ -7,6 +7,7 @@
         .zsasa = .{
             .url = "git+https://github.com/N283T/zsasa.git?ref=main#4fcecc1b77d9b3ac85e42cff013426569f8ef24d",
             .hash = "zsasa-0.12.0-d7uHxNj2JwBNAGuv3Kpvc3BYctx0WJLfLBeyTEr2Np5E",
+            .lazy = true,
         },
     },
     .paths = .{

@@ -148,6 +148,52 @@ r, g_r = pyztraj.compute_rdf(sel1_coords, sel2_coords, box_volume=1000.0)
 | TRR | Yes | Trajectory (GROMACS) |
 | DCD | Yes | Trajectory (CHARMM/NAMD) |
 
+## Using as a Zig package
+
+ztraj exposes two Zig modules:
+
+| Module | Root | Contents | Needs `zsasa` |
+|--------|------|----------|---------------|
+| `ztraj` | `src/root.zig` | Full library: I/O, geometry, analysis, selections | Yes (fetched lazily) |
+| `ztraj-io` | `src/io_root.zig` | Structure/trajectory I/O (PDB, mmCIF, GRO, XTC, TRR, DCD, prmtop, NetCDF) plus `types` and `element` | No |
+
+```bash
+zig fetch --save git+https://github.com/N283T/ztraj
+```
+
+Full library:
+
+```zig
+const ztraj = b.dependency("ztraj", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("ztraj", ztraj.module("ztraj"));
+```
+
+I/O only. Pass `.io_only = true` so ztraj never requests its lazy `zsasa`
+dependency; zsasa is then not fetched at all:
+
+```zig
+const ztraj = b.dependency("ztraj", .{
+    .target = target,
+    .optimize = optimize,
+    .io_only = true,
+});
+exe.root_module.addImport("ztraj-io", ztraj.module("ztraj-io"));
+```
+
+```zig
+const zio = @import("ztraj-io");
+
+var reader = try zio.xtc.XtcReader.open(io, allocator, "traj.xtc");
+defer reader.deinit();
+while (try reader.next()) |frame| {
+    _ = frame.x; // SOA coordinates in angstroms
+}
+```
+
+With `.io_only = true` only `ztraj-io` is defined; the `ztraj` module, CLI and
+shared library are not. `ztraj-io` types are a separate module instance from
+`ztraj.types`, so import one module or the other, not both.
+
 ## Building from source
 
 Requires [Zig 0.16.0+](https://ziglang.org/download/).
