@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.0] - 2026-11-20
 
 ### Fixed
 - DCD reader: a file that ends inside a frame now fails with `DcdError.TruncatedFrame` instead of being treated as a clean end of file; only an end between frames returns `null`
