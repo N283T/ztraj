@@ -21,9 +21,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    // The ztraj-io test binary is only compiled, which checks that the module
+    // builds on its own without zsasa. Its format tests already run through
+    // the ztraj module; running them here too would race on the fixed
+    // temporary file paths those tests write under test_data/.
     const test_step = b.step("test", "Run tests");
     const io_tests = b.addTest(.{ .root_module = io_mod });
-    test_step.dependOn(&b.addRunArtifact(io_tests).step);
+    test_step.dependOn(&io_tests.step);
 
     if (io_only) return;
 
