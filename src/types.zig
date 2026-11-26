@@ -20,7 +20,7 @@ pub fn FixedString(comptime N: u8) type {
     }
 
     return struct {
-        data: [N]u8 = [_]u8{0} ** N,
+        data: [N]u8 = @splat(0),
         len: u8 = 0,
 
         const Self = @This();
@@ -449,7 +449,7 @@ test "FixedString(5) truncation at 5" {
 test "FixedString format" {
     const FS4 = FixedString(4);
     const s = FS4.fromSlice("CA");
-    const rendered = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{s});
+    const rendered = try std.testing.allocator.print("{f}", .{s});
     defer std.testing.allocator.free(rendered);
     try std.testing.expectEqualStrings("CA", rendered);
 }

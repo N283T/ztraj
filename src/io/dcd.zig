@@ -587,7 +587,7 @@ fn putI32(list: *std.ArrayList(u8), a: std.mem.Allocator, v: i32) !void {
 fn buildTestDcd(a: std.mem.Allocator, p: TestDcd) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
-    var hdr = [_]u8{0} ** 84;
+    var hdr: [84]u8 = @splat(0);
     @memcpy(hdr[0..4], "CORD");
     std.mem.writeInt(i32, hdr[4..8], @intCast(p.nframes), .little);
     std.mem.writeInt(i32, hdr[8..12], p.istart, .little);

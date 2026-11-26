@@ -1453,16 +1453,16 @@ pub fn runSummary(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
 
     // -- Element composition ------------------------------------------------
     const Element = ztraj.element.Element;
-    const num_elements = @typeInfo(Element).@"enum".fields.len;
-    var elem_counts = [_]u32{0} ** num_elements;
+    const num_elements = @typeInfo(Element).@"enum".field_names.len;
+    var elem_counts: [num_elements]u32 = @splat(0);
     for (topo.atoms) |atom| {
-        elem_counts[@intFromEnum(atom.element)] += 1;
+        elem_counts[@backingInt(atom.element)] += 1;
     }
     try w.print("\nElements: ", .{});
     var first_elem = true;
     const common_elems = [_]Element{ .H, .C, .N, .O, .S, .P, .Fe, .Zn, .Ca, .Mg, .Na, .Cl, .K };
     for (common_elems) |e| {
-        const idx = @intFromEnum(e);
+        const idx = @backingInt(e);
         if (elem_counts[idx] > 0) {
             if (!first_elem) try w.print("  ", .{});
             try w.print("{s}:{d}", .{ @tagName(e), elem_counts[idx] });
@@ -1472,7 +1472,7 @@ pub fn runSummary(io: std.Io, allocator: std.mem.Allocator, args: Args) !void {
     }
     for (elem_counts, 0..) |count, idx| {
         if (count > 0) {
-            const e: Element = @enumFromInt(idx);
+            const e: Element = @fromBackingInt(@intCast(idx));
             if (!first_elem) try w.print("  ", .{});
             try w.print("{s}:{d}", .{ @tagName(e), count });
             first_elem = false;

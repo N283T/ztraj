@@ -225,7 +225,7 @@ fn parseTime(title: []const u8) f32 {
 /// All values are multiplied by 10 (nm → Angstroms).
 /// Returns null on parse failure.
 fn parseBoxVectors(line: []const u8) ?[3][3]f32 {
-    var values: [9]f32 = [_]f32{0} ** 9;
+    var values: [9]f32 = @splat(0);
     var count: usize = 0;
 
     var it = std.mem.tokenizeScalar(u8, line, ' ');

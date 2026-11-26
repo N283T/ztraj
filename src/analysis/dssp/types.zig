@@ -107,7 +107,7 @@ pub const StructureType = enum(u8) {
     bend = 'S',
 
     pub fn toChar(self: StructureType) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -119,7 +119,7 @@ pub const HelixType = enum(u2) {
     pp = 3, // polyproline II
 
     pub fn stride(self: HelixType) u32 {
-        return @as(u32, @intFromEnum(self)) + 3;
+        return @as(u32, @backingInt(self)) + 3;
     }
 };
 
@@ -197,7 +197,7 @@ pub const ResidueType = enum(u8) {
     }
 
     pub fn toChar(self: ResidueType) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -285,11 +285,11 @@ pub const DsspResidue = struct {
     }
 
     pub fn getHelixFlag(self: *const DsspResidue, ht: HelixType) HelixPositionType {
-        return self.helix_flags[@intFromEnum(ht)];
+        return self.helix_flags[@backingInt(ht)];
     }
 
     pub fn setHelixFlag(self: *DsspResidue, ht: HelixType, pos: HelixPositionType) void {
-        self.helix_flags[@intFromEnum(ht)] = pos;
+        self.helix_flags[@backingInt(ht)] = pos;
     }
 
     pub fn isHelixStart(self: *const DsspResidue, ht: HelixType) bool {
