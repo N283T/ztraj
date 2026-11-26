@@ -1,12 +1,12 @@
 .{
     .fingerprint = 0x17e956260cdc6d81,
     .name = .ztraj,
-    .version = "0.9.0",
-    .minimum_zig_version = "0.16.0",
+    .version = "0.10.0",
+    .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .zsasa = .{
-            .url = "git+https://github.com/N283T/zsasa.git?ref=main#4fcecc1b77d9b3ac85e42cff013426569f8ef24d",
-            .hash = "zsasa-0.12.0-d7uHxNj2JwBNAGuv3Kpvc3BYctx0WJLfLBeyTEr2Np5E",
+            .url = "git+https://github.com/N283T/zsasa.git?ref=main#c78a20b890378750fe12e3e710dfa31666ab1b4b",
+            .hash = "zsasa-0.13.0-d7uHxOxgKQDkADgDrAVvQUggw_V4XpLQfnqBu7ITNp6T",
             .lazy = true,
         },
     },

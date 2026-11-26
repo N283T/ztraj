@@ -1083,7 +1083,7 @@ pub const XtcWriter = struct {
         // XDR opaque data must be padded to 4-byte boundary
         const pad = (4 - (data.len % 4)) % 4;
         if (pad > 0) {
-            const zeros = [_]u8{0} ** 4;
+            const zeros: [4]u8 = @splat(0);
             self.io().writeAll(zeros[0..pad]) catch return XtcError.WriteError;
         }
     }

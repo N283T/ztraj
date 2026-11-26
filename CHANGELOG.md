@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.0] - 2026-11-26
+
+### Changed
+- Build with Zig 0.17.1 (`minimum_zig_version` 0.17.1); Zig 0.16 is no longer supported. CI, wheels and docs pin Zig 0.17.1. Results are unchanged: the 0.16 and 0.17 CLIs give byte-identical output across the analysis commands and format conversions
+- SASA: bump zsasa 0.12.0 → 0.13.0 (main at `c78a20b`, its Zig 0.17 port). Per-atom areas are unchanged
+- `run` step forwards arguments with `addPassthruArgs()`; `builtin.os`/`builtin.cpu` use `builtin.target`; `@typeInfo` field access uses the struct-of-arrays layout
+
+### Fixed
+- `superpose`: the SIMD store of rotated coordinates did not compile (it was never reached by a build or test before)
+
 ## [0.9.0] - 2026-11-20
 
 ### Fixed

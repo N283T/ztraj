@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const version = "0.9.0";
+const version = "0.10.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -87,9 +87,7 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     // Test step
     const mod_tests = b.addTest(.{ .root_module = mod });

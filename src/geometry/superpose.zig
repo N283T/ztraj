@@ -372,9 +372,9 @@ pub fn superpose(
             const nz = s_r20 * cx + s_r21 * cy + s_r22 * cz + s_ref_cz;
 
             // Narrow f64→f32 and store
-            out_x[i..][0..V].* = @floatCast(nx);
-            out_y[i..][0..V].* = @floatCast(ny);
-            out_z[i..][0..V].* = @floatCast(nz);
+            out_x[i..][0..V].* = @as(@Vector(V, f32), @floatCast(nx));
+            out_y[i..][0..V].* = @as(@Vector(V, f32), @floatCast(ny));
+            out_z[i..][0..V].* = @as(@Vector(V, f32), @floatCast(nz));
         }
 
         // Scalar tail

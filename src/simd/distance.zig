@@ -649,12 +649,12 @@ test "cpu_features - compile-time detection works" {
     const has_neon = cpu_features.has_neon;
 
     // On x86_64, if AVX-512 is available, AVX2 should also be available
-    if (builtin.cpu.arch == .x86_64 and has_avx512) {
+    if (builtin.target.cpu.arch == .x86_64 and has_avx512) {
         try std.testing.expect(has_avx2);
     }
 
     // On aarch64, NEON should always be available
-    if (builtin.cpu.arch == .aarch64) {
+    if (builtin.target.cpu.arch == .aarch64) {
         try std.testing.expect(has_neon);
     }
 

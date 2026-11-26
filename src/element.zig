@@ -132,18 +132,18 @@ pub const Element = enum(u8) {
 
     /// Get the atomic number (same as enum value)
     pub fn atomicNumber(self: Element) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 
     /// Get the element symbol as a string
     pub fn symbol(self: Element) []const u8 {
-        return element_names[@intFromEnum(self)];
+        return element_names[@backingInt(self)];
     }
 
     /// Get van der Waals radius in Angstroms (for fallback radius guessing)
     /// Values from gemmi/elem.hpp, originally from Wikipedia/cctbx
     pub fn vdwRadius(self: Element) f64 {
-        return vdw_radii[@intFromEnum(self)];
+        return vdw_radii[@backingInt(self)];
     }
 
     /// Get atomic mass in daltons (unified atomic mass units, u).
@@ -151,7 +151,7 @@ pub const Element = enum(u8) {
     /// Returns 0.0 for unknown (X) and for elements without a well-defined
     /// standard atomic weight (radioactive elements use most stable isotope).
     pub fn mass(self: Element) f64 {
-        return atomic_masses[@intFromEnum(self)];
+        return atomic_masses[@backingInt(self)];
     }
 
     /// Check if this is a common biological element
@@ -195,7 +195,7 @@ pub fn fromSymbol(symbol_str: []const u8) Element {
     // Two letter elements - search through the table
     for (element_names_upper, 0..) |name, i| {
         if (name.len == 2 and name[0] == upper[0] and name[1] == upper[1]) {
-            return @enumFromInt(i);
+            return @fromBackingInt(@intCast(i));
         }
     }
 
@@ -228,7 +228,7 @@ fn singleLetterElement(c: u8) Element {
 /// Create Element from atomic number
 pub fn fromAtomicNumber(n: u8) Element {
     if (n > 118) return .X;
-    return @enumFromInt(n);
+    return @fromBackingInt(@intCast(n));
 }
 
 // Element names (mixed case, standard notation)
@@ -445,7 +445,7 @@ test "mass lookup table length" {
 test "mass positive for all known elements" {
     // Every element except X should have mass > 0
     for (1..119) |i| {
-        const elem: Element = @enumFromInt(i);
+        const elem: Element = @fromBackingInt(@intCast(i));
         try std.testing.expect(elem.mass() > 0.0);
     }
     try std.testing.expectEqual(@as(f64, 0.0), Element.X.mass());

@@ -36,19 +36,19 @@ pub fn Epsilon(comptime T: type) type {
 /// Compile-time CPU feature detection for SIMD optimization.
 pub const cpu_features = struct {
     /// AVX-512F support (512-bit vectors)
-    pub const has_avx512f = if (builtin.cpu.arch == .x86_64)
-        std.Target.x86.featureSetHas(builtin.cpu.features, .avx512f)
+    pub const has_avx512f = if (builtin.target.cpu.arch == .x86_64)
+        std.Target.x86.featureSetHas(builtin.target.cpu.features, .avx512f)
     else
         false;
 
     /// AVX2 support (256-bit vectors)
-    pub const has_avx2 = if (builtin.cpu.arch == .x86_64)
-        std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)
+    pub const has_avx2 = if (builtin.target.cpu.arch == .x86_64)
+        std.Target.x86.featureSetHas(builtin.target.cpu.features, .avx2)
     else
         false;
 
     /// ARM NEON support (128-bit vectors, available on all aarch64)
-    pub const has_neon = builtin.cpu.arch == .aarch64;
+    pub const has_neon = builtin.target.cpu.arch == .aarch64;
 };
 
 /// Optimal vector widths based on detected CPU features.

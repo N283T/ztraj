@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyztraj"
-version = "0.9.0"
+version = "0.10.0"
 description = "Fast molecular dynamics trajectory analysis powered by Zig"
 readme = "README.md"
 license = "MIT"
@@ -61,7 +61,7 @@ test-command = "pytest {project}/python/tests -x -q"
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-all = "curl -sSfL https://ziglang.org/download/0.16.0/zig-$(uname -m)-linux-0.16.0.tar.xz | tar -xJ -C /usr/local && ln -sf /usr/local/zig-$(uname -m)-linux-0.16.0/zig /usr/local/bin/zig && zig build -Doptimize=ReleaseFast"
+before-all = "curl -sSfL https://ziglang.org/download/0.17.1/zig-$(uname -m)-linux-0.17.1.tar.xz | tar -xJ -C /usr/local && ln -sf /usr/local/zig-$(uname -m)-linux-0.17.1/zig /usr/local/bin/zig && zig build -Doptimize=ReleaseFast"
 
 [tool.cibuildwheel.macos]
 before-all = "zig build -Doptimize=ReleaseFast"

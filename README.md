@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/N283T/ztraj/actions/workflows/ci.yml/badge.svg)](https://github.com/N283T/ztraj/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pyztraj)](https://pypi.org/project/pyztraj/)
-[![Zig](https://img.shields.io/badge/Zig-0.16.0-f7a41d?logo=zig)](https://ziglang.org/)
+[![Zig](https://img.shields.io/badge/Zig-0.17.1-f7a41d?logo=zig)](https://ziglang.org/)
 [![Python](https://img.shields.io/pypi/pyversions/pyztraj)](https://pypi.org/project/pyztraj/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -196,7 +196,7 @@ shared library are not. `ztraj-io` types are a separate module instance from
 
 ## Building from source
 
-Requires [Zig 0.16.0+](https://ziglang.org/download/).
+Requires [Zig 0.17.1+](https://ziglang.org/download/).
 
 ```bash
 # Build CLI + shared library
