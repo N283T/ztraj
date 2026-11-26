@@ -22,11 +22,18 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# setup-zig notes (apply to every job that uses it):
+# - timeout-minutes leaves room for one unresponsive Zig download mirror,
+#   which costs setup-zig about 10 minutes before it moves to the next one.
+# - cache-key includes build.zig.zon, so a dependency change never restores a
+#   cache holding older zsasa/ztraj packages. Zig 0.17 compiles the build.zig
+#   of every lazy dependency it finds in the cache, and an outdated one breaks
+#   the build.
 jobs:
   build_wheels:
     name: Wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +52,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Cache cibuildwheel
         if: runner.os != 'Linux'
@@ -96,7 +104,7 @@ jobs:
   build_cli:
     name: CLI (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -124,6 +132,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Build CLI
         run: zig build -Doptimize=ReleaseFast
@@ -136,6 +145,9 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # A workflow_dispatch rehearsal runs on a branch such as
+          # feature/foo; keep the slash out of the file name.
+          VERSION="${VERSION//\//-}"
           ASSET_NAME="ztraj-${VERSION}-${{ matrix.target }}"
           mkdir -p dist
           if [ "${{ matrix.target }}" = "windows-x86_64" ]; then
