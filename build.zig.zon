@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .zsasa = .{
-            .url = "git+https://github.com/N283T/zsasa.git?ref=main#4fcecc1b77d9b3ac85e42cff013426569f8ef24d",
-            .hash = "zsasa-0.12.0-d7uHxNj2JwBNAGuv3Kpvc3BYctx0WJLfLBeyTEr2Np5E",
+            .url = "git+https://github.com/N283T/zsasa.git?ref=feature/zig-0.17#6ba597b5e1574ef9cda40f5c55c9a0c03e56ab3c",
+            .hash = "zsasa-0.13.0-d7uHxOxgKQDkADgDrAVvQUggw_V4XpLQfnqBu7ITNp6T",
             .lazy = true,
         },
     },
