@@ -24,11 +24,18 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# setup-zig notes (apply to every job that uses it):
+# - timeout-minutes leaves room for one unresponsive Zig download mirror,
+#   which costs setup-zig about 10 minutes before it moves to the next one.
+# - cache-key includes build.zig.zon, so a dependency change never restores a
+#   cache holding older zsasa/ztraj packages. Zig 0.17 compiles the build.zig
+#   of every lazy dependency it finds in the cache, and an outdated one breaks
+#   the build.
 jobs:
   fmt:
     runs-on: ubuntu-latest
     name: Format check
-    timeout-minutes: 5
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -38,6 +45,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Check formatting
         run: zig fmt --check src/
@@ -55,7 +63,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.name }})
     needs: [fmt]
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -65,6 +73,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Run tests
         run: zig build test
@@ -98,7 +107,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Python (${{ matrix.name }})
     needs: [fmt]
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -108,6 +117,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Build shared library
         run: zig build -Doptimize=ReleaseFast
@@ -165,7 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Validation suite
     needs: [fmt]
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -175,6 +185,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Build shared library
         run: zig build -Doptimize=ReleaseFast
@@ -199,7 +210,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Source dist smoke test
     needs: [fmt]
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -209,6 +220,7 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+          cache-key: ${{ hashFiles('build.zig.zon') }}
 
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
